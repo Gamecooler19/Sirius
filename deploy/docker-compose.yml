@@ -1,0 +1,177 @@
+name: univadmissions
+
+# Local development stack only. No ADR-06 (loopback-only publish / UFW
+# hardening) in this module -- that concern is specific to a public cloud
+# deployment target, which this module does not have yet. Datastores
+# (postgres, pgbouncer, valkey) still publish nothing to the host: there is
+# no reason for them to, and the api/migrate containers reach them by
+# service name over the compose bridge network regardless. api and rustfs
+# publish on plain loopback (127.0.0.1) as an ordinary local-dev habit, not
+# because a UFW/DOCKER-USER threat model applies yet.
+#
+# Credentials come from deploy/.env (gitignored; deploy/.env.example is
+# committed) via Compose's ${VAR} interpolation at parse time -- no running
+# container ever sees deploy/.env as a filesystem path.
+
+networks:
+  univadmissions-net:
+    driver: bridge
+
+volumes:
+  univadmissions-postgres-data:
+  univadmissions-valkey-data:
+  univadmissions-rustfs-data:
+
+services:
+  postgres:
+    build:
+      context: ./postgres
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # POSTGRES_USER is the bootstrap superuser, deliberately NOT
+      # "univadmissions" -- see ADR-02 and 01-create-app-role.sh.
+      POSTGRES_DB: univadmissions
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      UNIVADMISSIONS_DB_PASSWORD: ${UNIVADMISSIONS_DB_PASSWORD}
+    volumes:
+      - univadmissions-postgres-data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    networks:
+      - univadmissions-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d univadmissions"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgbouncer:
+    build:
+      context: ./pgbouncer
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "6432"
+    networks:
+      - univadmissions-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U univadmissions -d univadmissions"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    volumes:
+      - univadmissions-valkey-data:/data
+    expose:
+      - "6379"
+    networks:
+      - univadmissions-net
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:17188
+    volumes:
+      - univadmissions-rustfs-data:/data
+    ports:
+      - "127.0.0.1:17188:17188"
+    networks:
+      - univadmissions-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:17188/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot migration runner: applies `alembic upgrade head` and exits.
+  # `api` depends on this completing successfully rather than running
+  # migrations in its own entrypoint, avoiding a race between the app
+  # starting and migrations completing.
+  migrate:
+    build:
+      context: ..
+      dockerfile: api/Dockerfile
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://univadmissions:${UNIVADMISSIONS_DB_PASSWORD}@pgbouncer:6432/univadmissions
+      # ADR-01 point 3 + ADR-02: direct-to-Postgres (bypassing PgBouncer)
+      # for Alembic's DDL/advisory-lock session continuity, but as the
+      # ordinary `univadmissions` role, never as the `postgres` bootstrap
+      # superuser -- migrations must create every table AS the role that
+      # will later own and be FORCE-RLS-subject to it (ADR-02), or table
+      # ownership silently lands on `postgres` instead and the app role
+      # ends up with zero privileges on its own schema's tables. Found and
+      # fixed for real during this module's own live-stack verification:
+      # connecting as postgres here left `univadmissions` unable to even
+      # SELECT from "role" ("permission denied for table role").
+      DATABASE_DIRECT_URL: postgresql+asyncpg://univadmissions:${UNIVADMISSIONS_DB_PASSWORD}@postgres:5432/univadmissions
+      VALKEY_URL: redis://valkey:6379/0
+      RUSTFS_ENDPOINT: http://rustfs:17188
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      RUSTFS_BUCKET: ${RUSTFS_BUCKET}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      SESSION_ENCRYPTION_KEY: ${SESSION_ENCRYPTION_KEY}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY}
+      ENVIRONMENT: ${ENVIRONMENT}
+      LOG_LEVEL: ${LOG_LEVEL}
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - univadmissions-net
+
+  api:
+    build:
+      context: ..
+      dockerfile: api/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://univadmissions:${UNIVADMISSIONS_DB_PASSWORD}@pgbouncer:6432/univadmissions
+      DATABASE_DIRECT_URL: postgresql+asyncpg://univadmissions:${UNIVADMISSIONS_DB_PASSWORD}@postgres:5432/univadmissions
+      VALKEY_URL: redis://valkey:6379/0
+      RUSTFS_ENDPOINT: http://rustfs:17188
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      RUSTFS_BUCKET: ${RUSTFS_BUCKET}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      SESSION_ENCRYPTION_KEY: ${SESSION_ENCRYPTION_KEY}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY}
+      ENVIRONMENT: ${ENVIRONMENT}
+      LOG_LEVEL: ${LOG_LEVEL}
+    ports:
+      - "127.0.0.1:38210:38210"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      valkey:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+    networks:
+      - univadmissions-net
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:38210/healthz')\" || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10

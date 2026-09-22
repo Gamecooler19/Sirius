@@ -1,0 +1,17 @@
+;; PgBouncer auth file. Format: "username" "password-hash-or-plaintext"
+;;
+;; Copy to deploy/pgbouncer/userlist.txt and replace "changeme" below with
+;; the real `univadmissions` role's password -- the exact same value as
+;; deploy/.env's own UNIVADMISSIONS_DB_PASSWORD. deploy/pgbouncer/userlist.txt
+;; is gitignored; only this .example file is committed.
+;;
+;; This governs pgbouncer's own outbound connection *to* Postgres, distinct
+;; from pgbouncer.ini's auth_type (which governs the client-to-pgbouncer
+;; leg only). A stale value here breaks every pooled DATABASE_URL connection
+;; while DATABASE_DIRECT_URL (Alembic, which bypasses pgbouncer) keeps
+;; working -- a real footgun documented in the GeM precedent this stack is
+;; modeled on.
+;;
+;; Baked into the pgbouncer image at build time, so a password rotation
+;; requires rebuilding the pgbouncer image, not merely restarting it.
+"univadmissions" "changeme"

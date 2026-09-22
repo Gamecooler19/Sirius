@@ -1,0 +1,21 @@
+# Secrets
+deploy/.env
+deploy/pgbouncer/userlist.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# uv
+uv.lock.tmp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes are named volumes, not bind mounts -- nothing local to ignore there.
