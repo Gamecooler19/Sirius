@@ -314,3 +314,89 @@ committed to git.
       a real page boundary, 403-vs-empty-list on the role-gated list
       endpoints, 404-vs-empty-list on status-history and finance.
 - [x] Report committed as `reports/module-04-read-endpoints.md`.
+
+## Follow-up verification
+
+Two gaps in this module's own original verification, closed against the
+same live stack and the same seed data already sitting in it — no new
+seeding. Both checks confirmed the existing design; neither surfaced a
+real defect, so no code change was needed.
+
+### 1. Applicant-list filters combine with AND, not one overriding the other
+
+The original report verified `program=CS` (`total: 15`) and
+`current_status=APPLIED` (`total: 10`) as counselor A **individually**,
+but never in the same request — leaving open whether `list_applicants`'s
+`filters` list (`app/routers/applicants_read.py`) genuinely `AND`s every
+active filter together, or whether a bug (e.g. only the last-applied
+`.where()` call taking effect, or one filter silently short-circuiting
+the query builder) would let one filter quietly win over the other while
+still returning a plausible-looking response.
+
+Requested `GET /applicants?program=CS&current_status=APPLIED&limit=100`
+as counselor A against the live stack. Result: `total: 6`, six items,
+applicants A00/A06/A12/A18/A22/A24. Cross-checked against the seed
+pattern used to build this data (`program = CS if i % 2 == 0 else ECE`,
+`current_status = APPLIED if i % 3 == 0 else IMPORTED`, for `i` in
+`0..29`, documented in the original report and since cleaned up per this
+module's own artifact-cleanup discipline): five of the six returned
+indices (`0, 6, 12, 18, 24`) are exactly the values divisible by both 2
+and 3 from the original seed pattern; the sixth, `A22`, is `CS` (even)
+and was separately transitioned to `APPLIED` via the real `POST
+/applicants/{id}/status` call already made earlier in this module's own
+original verification (see "Status-history — 404-vs-empty-list
+distinction" above) rather than by the seed pattern itself. Both sources
+of `APPLIED`-status CS applicants are correctly reflected in the
+combined-filter result.
+
+This is the mathematically exact intersection of "CS" (15 applicants)
+and "APPLIED" (10 applicants) — `6 < 15` and `6 < 10`, satisfying the
+review's own sanity check that the combined total be strictly smaller
+than either individual filter's total, not equal to either (which would
+indicate one filter being ignored) and not their sum or union (which
+would indicate `OR` instead of `AND`). Every one of the six returned
+items was independently confirmed to carry both `"program":"CS"` and
+`"current_status":"APPLIED"` by searching the raw response for any
+`"program":"ECE"` or `"current_status":"IMPORTED"` occurrence — zero
+matches for either, confirming no mismatched row leaked through under
+either field. No code change needed; `list_applicants`'s `for f in
+filters: ... query.where(f)` loop genuinely composes every active filter
+with `AND`, exactly as written.
+
+### 2. The two new role-gates, tested against the role most likely to reveal over-inclusion
+
+The original report verified each role-gated list endpoint's exclusion
+against `ADMISSIONS_COUNSELOR` — a role with no plausible reason to be
+included in either allowlist, and the least interesting negative case
+for catching an accidentally-too-broad `_LIST_ROLES` tuple, since nobody
+would expect a counselor to slip through by coincidence. The two roles
+genuinely worth testing are the ones with *some* adjacent legitimate
+claim to the data: `ADMISSIONS_MANAGER` (broad applicant visibility
+everywhere else in this system) against `/finance/payment-claims`, and
+`FINANCE_STAFF` (a real, active finance role) against `/import-batches`.
+
+- `GET /finance/payment-claims` as `ADMISSIONS_MANAGER`: 403,
+  `"insufficient role for this action"` — confirmed the manager's broad
+  applicant-list visibility (verified extensively in the original
+  report, `total: 34`/`36` across both counselors) does **not** extend to
+  this endpoint's own `_LIST_ROLES` tuple
+  (`SUPER_ADMIN`/`FINANCE_STAFF`/`FINANCE_MANAGER`/`AUDITOR`), which
+  correctly does not include `ADMISSIONS_MANAGER` at all.
+- `GET /import-batches` as `FINANCE_STAFF`: 403, same message — confirmed
+  a real, TOTP-enrolled, actively-used finance role in this system does
+  **not** fall inside this endpoint's own `_LIST_ROLES` tuple
+  (`SUPER_ADMIN`/`ADMISSIONS_MANAGER`/`AUDITOR`), which correctly does
+  not include `FINANCE_STAFF`.
+- Both negative cases were paired with a positive sanity check against
+  the *same* two role/endpoint combinations from the other direction, to
+  confirm the gates are precisely scoped rather than accidentally too
+  narrow in the process of being correctly not-too-broad: `FINANCE_STAFF`
+  against `/finance/payment-claims` still returns `200`/`total: 2` (its
+  own legitimate endpoint), and `ADMISSIONS_MANAGER` against
+  `/import-batches` still returns `200`/`total: 1` (its own legitimate
+  endpoint, the real batch from the original report's live import).
+
+Both role-gates are exactly as narrow as intended — no accidental
+over-inclusion in either direction, and no accidental exclusion of a
+role that does belong. No code change needed.
+
