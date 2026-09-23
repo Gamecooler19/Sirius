@@ -66,6 +66,24 @@ restricted to the finance roles; the trigger's insert, the only way
 directly), is never blocked by a role check that was never about the
 trigger. This split alone was not sufficient on its own, though -- see the
 `ON CONFLICT` note above for the second, independent fix this required.
+
+**`WITH CHECK (true)` on `finance_record_insert` applies to INSERT only
+and does not touch `finance_record_select`'s own `USING` clause --
+stated explicitly because the two policies are separate Postgres objects
+with separate, unrelated predicates, not one relaxed rule.** An
+`ADMISSIONS_COUNSELOR` can now cause a row to be inserted (via the
+trigger) but still cannot read any `finance_record` row afterward,
+including the one their own transition just created. Verified live, not
+by re-reading this policy SQL: a real `ADMISSIONS_COUNSELOR` session
+(via `app.core.db.open_scoped_session` with that role's real
+`actor_id`/`actor_role`, the identical mechanism a real request uses)
+transitioned its own assigned applicant to `ADMISSION_TAKEN` through the
+actual `POST /applicants/{id}/status` endpoint, then immediately queried
+`finance_record` for that applicant in a fresh scoped session under the
+same counselor identity and saw zero rows -- while a superuser connection
+confirmed the row genuinely exists, and a `FINANCE_MANAGER`-scoped session
+saw it correctly. See `reports/module-02-status-and-import.md`'s
+"Follow-up verification" section for the full account.
 """
 from collections.abc import Sequence
 

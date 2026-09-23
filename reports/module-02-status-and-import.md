@@ -266,3 +266,108 @@ a real `FAILED` row with the exact `error_detail` message.
 Payment-claim submit/confirm endpoints. `finance_record` and its
 admission-gate/auto-create triggers already exist from this and the prior
 module and needed no further schema change here.
+
+## Follow-up verification
+
+Three open items from the review of the work above, closed before starting
+Module 03. All verification here is against the same live stack this
+module's own report already establishes, not a re-read of code or SQL.
+
+### 1. Migration 0006's old-to-new status remap: semantic, not positional
+
+Checked whether `OLD_TO_NEW` in `0006_status_enum_rename.py` was a
+reviewed correspondence or an accidental positional/ordinal mapping (e.g.
+old value N silently mapped to new value N regardless of meaning). It is
+genuinely semantic: `DOCUMENTS_SUBMITTED` and `UNDER_REVIEW` -- two
+different old values, at different ordinal positions -- both map to the
+single new value `IN_PROCESS`, which a positional mapping could not
+produce (a positional scheme is 1:1 by construction; this one is
+deliberately many-to-one where the old vocabulary was finer-grained than
+the new one warrants). The migration's own docstring already carried an
+explicit `OLD_VALUE -> NEW_VALUE` table before this review, stating the
+mapping decision in prose for each of the eight old values, including the
+rationale for the two-old-values-into-one-new-value case
+(`UNDER_REVIEW`'s only reasonable new-vocabulary home is `IN_PROCESS`,
+the same bucket `DOCUMENTS_SUBMITTED` lands in). No code change was
+needed here -- the existing docstring already meets the bar this item was
+checking for. The rows this remap actually touched were disposable
+dev-verification data (this module's own report already states the table
+was empty when the migration was first run), but the pattern -- an
+explicit, reviewed `OLD_TO_NEW` dict driving a `CASE`-expression `UPDATE`,
+not a bare ordinal reindex -- is the one to keep using for any future
+enum vocabulary change that does have to remap real applicant rows.
+
+### 2. Defect 1's fix did not loosen `finance_record`'s SELECT policy
+
+Verified live, through the real application code path, not by re-reading
+`0007_finance_record_auto_create.py`'s policy SQL:
+
+1. Seeded a fresh `ADMISSIONS_COUNSELOR` user and an applicant assigned to
+   them, already at `ADMISSION_OFFERED`.
+2. Logged in as that counselor over real HTTP (`POST /auth/login`).
+3. Called the real `POST /applicants/{id}/status` endpoint as that
+   counselor to transition their own applicant to `ADMISSION_TAKEN` (200
+   OK) -- this is the exact call that fires the
+   `applicant_create_finance_record()` trigger and, per Defect 1, needed
+   the `finance_record_insert` policy fix to succeed at all.
+4. Immediately afterward, in a **fresh `open_scoped_session` call carrying
+   that same counselor's real `actor_id`/`actor_role`** -- the identical
+   mechanism `app.core.deps.get_scoped_session` uses for every real
+   request -- queried `finance_record` for that applicant.
+
+Result: `0` rows visible. A parallel superuser connection confirmed the
+row genuinely exists (`total_fee_due = 0.00`), and a `FINANCE_MANAGER`-
+scoped session correctly saw it. This confirms the split introduced by
+Defect 1's fix (`finance_record_select` restricted to `SUPER_ADMIN`/
+`FINANCE_STAFF`/`FINANCE_MANAGER`/`AUDITOR`, `finance_record_insert` with
+`WITH CHECK (true)`) did exactly what it was supposed to and nothing
+more: the counselor's *write* (via the trigger) is permitted, their
+*read* remains correctly denied, including of the very row their own
+action just created. Migration `0007`'s docstring was strengthened with
+an explicit paragraph stating this (mirroring the equivalent statement
+Module 01 made for `audit_log`) and recording this verification.
+
+### 3. `get_scoped_session`'s transaction-scoped GUCs, and a corrected finding
+
+Added a note to `open_scoped_session` (`app/core/db.py`) and its wrapper
+`get_scoped_session` (`app/core/deps.py`) flagging that the `SET LOCAL`
+GUCs they set belong to the one transaction `session.begin()` opens, so a
+mid-request `db.commit()` -- the exact shape Defect 3's fix introduced,
+committing a `FAILED` `import_batch` row before raising a 422 -- ends
+that transaction.
+
+**The first draft of this note, written before checking, was wrong about
+the actual failure mode**, and was corrected after live reproduction:
+
+- **Initial (incorrect) assumption**: a mid-request commit would silently
+  drop back to unscoped behavior, so any further database work in the
+  same request would quietly see zero rows (RLS fail-closed) rather than
+  erroring -- "easy to misread as no matching rows."
+- **What was actually reproduced**, using the identical
+  `async_session_factory() as session, session.begin()` shape
+  `open_scoped_session` uses: calling `session.commit()` mid-transaction
+  and then calling `session.execute(...)` again on that same session
+  raises `sqlalchemy.exc.InvalidRequestError: Can't operate on closed
+  transaction inside context manager` **immediately, every time** -- not
+  a silent fallback, a hard error. Calling `commit()` and then *not*
+  touching the session again before the request ends (Defect 3's own
+  fix's actual shape, where `db.commit()` is immediately followed by
+  `raise HTTPException`) is safe: the exception propagates into the
+  generator dependency at its `yield` point, `session.begin()`'s own
+  `__aexit__` attempts a rollback against the already-committed
+  transaction, and SQLAlchemy accepts that as a no-op. Re-ran the real
+  live `POST /import/applicants` rejected-header case one more time after
+  this check to confirm the actual endpoint still behaves correctly (422
+  returned, `FAILED` `import_batch` row correctly persisted) -- it does.
+
+Both docstrings (`open_scoped_session` and `get_scoped_session`) were
+rewritten with the corrected, empirically-verified behavior: a mid-request
+commit followed by immediately raising is safe; a mid-request commit
+followed by *any further use of that session* is a hard `InvalidRequestError`,
+not a silent scope loss. This is materially relevant to Module 03: a
+payment-claim confirm endpoint that needs to persist a confirmation and
+then perform further RLS-scoped work in the same request cannot reuse the
+session past a mid-request commit -- it must open a fresh
+`open_scoped_session` for that further work, or it will crash with a 500,
+not silently return wrong data.
+

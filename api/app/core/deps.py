@@ -74,6 +74,20 @@ async def get_scoped_session(
     at login -- an account an administrator just deactivated must lose
     access on its very next request, not after its session naturally
     expires), and yields the session.
+
+    **The `SET LOCAL` GUCs this sets belong to the transaction
+    `open_scoped_session` opened, and a mid-request `db.commit()` on the
+    yielded session closes that specific transaction object** -- see
+    `app.core.db.open_scoped_session`'s own docstring for the full,
+    empirically-verified account (including the Module 02 Defect 3 fix, a
+    mid-request `db.commit()` to persist a rejected-import batch before
+    raising, which is safe precisely because it does not touch the session
+    again afterward). Any route that commits mid-request and then tries to
+    do *more* work on the same session -- not this fix's own shape, but a
+    plausible one for Module 03's payment-claim confirm endpoint -- gets a
+    hard `InvalidRequestError` immediately, not a silent unscoped fallback;
+    open a fresh `open_scoped_session` for any work that must happen after
+    a mid-request commit.
     """
     user_id = uuid.UUID(session.user_id)
 

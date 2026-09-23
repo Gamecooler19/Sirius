@@ -97,6 +97,40 @@ async def open_scoped_session(
     `NULLIF` note) inside the transaction, and every RLS policy comparing
     against it evaluates to NULL (false), so the session sees zero rows on
     every scoped table rather than every row.
+
+    **These `SET LOCAL` GUCs are scoped to the transaction this function
+    opens, and calling `db.commit()` on the yielded session before the
+    `async with` block this function wraps has exited closes that specific
+    transaction object.** Verified live (not asserted from reading
+    SQLAlchemy's source): a request handler that calls `db.commit()` mid-
+    request -- to persist a partial failure before raising an error
+    response, the exact shape Module 02's Defect 3 fix introduced for the
+    rejected-import case (see `app/routers/import_.py` and
+    `reports/module-02-status-and-import.md`'s "Follow-up verification"
+    section for the full account) -- and then immediately raises without
+    touching the session again is safe: Python throws the exception into
+    this generator at its `yield` point, `session.begin()`'s own
+    `__aexit__` attempts a rollback against the now-already-committed
+    transaction, and SQLAlchemy accepts that no-op cleanly. **But any
+    further `session.execute(...)` call on that same session, for any
+    reason, after that mid-request commit and before the generator
+    unwinds, raises `sqlalchemy.exc.InvalidRequestError: Can't operate on
+    closed transaction inside context manager` immediately** -- not a
+    silent fall-back to unscoped/fail-closed RLS behavior, a hard error.
+    Confirmed by reproducing both outcomes directly against this exact
+    session-factory/`session.begin()` shape: committing then immediately
+    raising (no further session use) completed cleanly with the FAILED
+    batch row correctly persisted; committing then issuing one more
+    `execute()` on the same session raised `InvalidRequestError`
+    immediately, every time. A future route with a "commit a partial
+    result, then keep doing more RLS-scoped work in the same request"
+    shape -- Module 03's payment-claim confirm endpoint is a plausible
+    candidate, if it needs to record a confirmation and then read/write
+    something else afterward -- must open a fresh `open_scoped_session`
+    (or an unscoped `get_db()` session, if RLS scope is not needed for
+    that further work) rather than reusing the session past its own
+    mid-request commit; reusing it will not silently misbehave, but it
+    will crash with a 500 the instant it is touched again.
     """
     async with async_session_factory() as session, session.begin():
         if actor_id is not None:
