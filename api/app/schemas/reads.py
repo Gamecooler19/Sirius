@@ -117,3 +117,54 @@ class ImportBatchListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class PaymentClaimStatusBreakdown(BaseModel):
+    """One status bucket (`PENDING`/`CONFIRMED`/`REJECTED`) within a
+    reconciliation row. Always present for all three `PaymentClaimStatus`
+    values in a given row's `claims_by_status`, even when a status has
+    zero claims in that scope -- `count: 0, amount: 0` rather than the
+    status being absent from the list, so a caller can always index by
+    status without a membership check.
+    """
+
+    status: PaymentClaimStatus
+    count: int
+    amount: Decimal
+
+
+class ReconciliationCycle(BaseModel):
+    """One `GET /finance/reconciliation` row: every `finance_record`
+    whose parent `applicant.intake_cycle` equals this cycle, summed, plus
+    the same breakdown for every `payment_claim` against one of those
+    `finance_record`s.
+    """
+
+    intake_cycle: str
+    finance_record_count: int
+    total_fee_due: Decimal
+    total_paid: Decimal
+    outstanding: Decimal
+    claims_by_status: list[PaymentClaimStatusBreakdown]
+
+
+class ReconciliationTotals(BaseModel):
+    """Same shape as `ReconciliationCycle` minus `intake_cycle` -- the
+    sum of every cycle row combined. Built by summing the already-
+    computed `cycles` array in the route itself (`app.routers.reconciliation`),
+    not by a second, independent SQL aggregate query -- see that route's
+    own docstring for why this is a structural guarantee against drift
+    between this field and the array it summarizes, not merely a fact
+    that happens to be true today.
+    """
+
+    finance_record_count: int
+    total_fee_due: Decimal
+    total_paid: Decimal
+    outstanding: Decimal
+    claims_by_status: list[PaymentClaimStatusBreakdown]
+
+
+class ReconciliationResponse(BaseModel):
+    cycles: list[ReconciliationCycle]
+    totals: ReconciliationTotals

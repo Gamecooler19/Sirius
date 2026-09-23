@@ -11,6 +11,7 @@ from app.routers import (
     import_,
     import_batches_read,
     payment_claim,
+    reconciliation,
     status,
 )
 
@@ -33,6 +34,7 @@ app.include_router(import_.router)
 app.include_router(payment_claim.router)
 app.include_router(applicants_read.router)
 app.include_router(import_batches_read.router)
+app.include_router(reconciliation.router)
 
 
 @app.get("/healthz")
