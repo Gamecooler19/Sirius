@@ -44,6 +44,20 @@ class PaymentClaimStatus(str, enum.Enum):
     REJECTED = "REJECTED"
 
 
+class PaymentMode(str, enum.Enum):
+    """Closed vocabulary for how a payment claim's money was actually
+    moved -- matches this project's existing precedent of a native enum
+    over free text for a closed-vocabulary field (e.g. `ApplicationStatus`).
+    """
+
+    CASH = "CASH"
+    CHEQUE = "CHEQUE"
+    BANK_TRANSFER = "BANK_TRANSFER"
+    UPI = "UPI"
+    CARD = "CARD"
+    OTHER = "OTHER"
+
+
 class RoleCode(str, enum.Enum):
     """Stable, machine-facing identifiers -- distinct from `role.name`, the
     human-readable display label. RBAC dependencies and RLS policies key off

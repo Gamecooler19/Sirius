@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
-from app.routers import admin, auth, import_, status
+from app.routers import admin, auth, import_, payment_claim, status
 
 settings = get_settings()
 
@@ -22,6 +22,7 @@ app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(status.router)
 app.include_router(import_.router)
+app.include_router(payment_claim.router)
 
 
 @app.get("/healthz")

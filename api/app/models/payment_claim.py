@@ -11,9 +11,10 @@ Enforced twice, deliberately redundant:
    this project's general preference for database-enforced invariants over
    ones that live only in service code (ADR-07's reasoning applies equally
    here, even though this is a CHECK constraint rather than a trigger).
-2. The service-layer confirmation endpoint (next module) additionally
-   rejects the attempt before it ever reaches the database, so the failure
-   the user sees is a clean 4xx rather than a raw constraint-violation error.
+2. The service-layer confirmation endpoint (`app/routers/payment_claim.py`,
+   Module 03) additionally rejects the attempt before it ever reaches the
+   database, so the failure the user sees is a clean 422 rather than a raw
+   constraint-violation error.
 
 `confirmed_by` and `confirmed_at` are both nullable: a claim starts
 `PENDING` with neither set, and both are populated together the instant a
@@ -28,7 +29,7 @@ from sqlalchemy import CheckConstraint, Enum, Numeric
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UUIDPKMixin
-from app.models.enums import PaymentClaimStatus
+from app.models.enums import PaymentClaimStatus, PaymentMode
 from app.models.types import fk_uuid
 
 
@@ -48,6 +49,10 @@ class PaymentClaim(UUIDPKMixin, TimestampMixin, Base):
     status: Mapped[PaymentClaimStatus] = mapped_column(
         Enum(PaymentClaimStatus, name="payment_claim_status", native_enum=True), nullable=False
     )
+    payment_mode: Mapped[PaymentMode] = mapped_column(
+        Enum(PaymentMode, name="payment_mode", native_enum=True), nullable=False
+    )
+    reference_number: Mapped[str | None] = mapped_column(nullable=True)
 
     submitted_by: Mapped[uuid.UUID] = mapped_column(*fk_uuid("user.id"), nullable=False)
     confirmed_by: Mapped[uuid.UUID | None] = mapped_column(*fk_uuid("user.id"), nullable=True)
