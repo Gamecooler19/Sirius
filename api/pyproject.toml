@@ -18,6 +18,13 @@ dependencies = [
   "cryptography>=43.0,<44.0",
   # RFC 6238 TOTP generation/verification.
   "pyotp>=2.9,<3.0",
+  # Module 02: .xlsx parsing for the Excel-import endpoint.
+  "openpyxl>=3.1,<4.0",
+  # Module 02: FastAPI's UploadFile / File() requires python-multipart at
+  # runtime to parse multipart/form-data request bodies -- not imported
+  # directly by application code, but FastAPI raises at request time
+  # without it installed.
+  "python-multipart>=0.0.12,<0.1",
 ]
 
 [dependency-groups]

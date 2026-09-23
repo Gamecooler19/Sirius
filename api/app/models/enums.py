@@ -11,11 +11,21 @@ import enum
 
 
 class ApplicationStatus(str, enum.Enum):
-    INQUIRY = "INQUIRY"
-    APPLICATION_STARTED = "APPLICATION_STARTED"
-    DOCUMENTS_SUBMITTED = "DOCUMENTS_SUBMITTED"
-    UNDER_REVIEW = "UNDER_REVIEW"
-    OFFER_MADE = "OFFER_MADE"
+    """The agreed admissions pipeline. `IMPORTED` is the default status a
+    freshly-imported applicant gets (Module 02's Excel-import endpoint).
+    `ENROLLED` is deliberately not part of this vocabulary -- out of scope
+    for now; see migration `0006_status_enum_rename` for the correction
+    that fixed a naming drift from an earlier, unilaterally-chosen set
+    (`INQUIRY`/`APPLICATION_STARTED`/`DOCUMENTS_SUBMITTED`/`UNDER_REVIEW`/
+    `OFFER_MADE`) to this one. Valid transitions between these values are
+    enforced by `app.services.status_transitions`, not by this enum.
+    """
+
+    IMPORTED = "IMPORTED"
+    APPLIED = "APPLIED"
+    IN_PROCESS = "IN_PROCESS"
+    ON_HOLD = "ON_HOLD"
+    ADMISSION_OFFERED = "ADMISSION_OFFERED"
     ADMISSION_TAKEN = "ADMISSION_TAKEN"
     REJECTED = "REJECTED"
     WITHDRAWN = "WITHDRAWN"

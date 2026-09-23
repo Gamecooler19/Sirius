@@ -114,3 +114,32 @@ def require_role(*allowed_role_codes: RoleCode):
         return user
 
     return _dependency
+
+
+def require_role_session(*allowed_role_codes: RoleCode):
+    """Like `require_role`, but yields `(user, db)` together instead of
+    only `user` -- for routes that need to both enforce RBAC *and* perform
+    further reads/writes against the same RLS-scoped transaction the role
+    check itself ran under, rather than opening a second scoped session
+    (a second transaction, with its own separate `SET LOCAL` GUCs) for the
+    route body's own work. `status.transition_applicant_status` is the
+    first consumer: one transaction covers the role check, the applicant
+    read, the status `UPDATE` (which fires the `finance_record`
+    auto-create trigger), and the `application_status_event` insert.
+    """
+
+    async def _dependency(
+        session: SessionData = Depends(get_current_user),
+        db: AsyncSession = Depends(get_scoped_session),
+    ) -> tuple[User, AsyncSession]:
+        result = await db.execute(
+            select(User).join(Role, User.role_id == Role.id).where(User.id == uuid.UUID(session.user_id))
+        )
+        user = result.scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "account not found")
+        if session.role_code not in {r.value for r in allowed_role_codes}:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "insufficient role for this action")
+        return user, db
+
+    return _dependency

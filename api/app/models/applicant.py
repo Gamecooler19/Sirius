@@ -19,7 +19,7 @@ inquiry.
 
 import uuid
 
-from sqlalchemy import Enum
+from sqlalchemy import Enum, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UUIDPKMixin
@@ -45,4 +45,11 @@ class Applicant(UUIDPKMixin, TimestampMixin, Base):
     program: Mapped[str] = mapped_column(nullable=False)
     intake_cycle: Mapped[str] = mapped_column(nullable=False)
 
-    current_status: Mapped[ApplicationStatus] = mapped_column(_status_enum, nullable=False)
+    # Default IMPORTED (migration 0006): the status a freshly-imported
+    # applicant gets. The Excel-import endpoint (app/routers/import_.py)
+    # sets this explicitly on every insert regardless -- the server_default
+    # here is a safety net for any other insert path, not the only place
+    # this value is decided.
+    current_status: Mapped[ApplicationStatus] = mapped_column(
+        _status_enum, nullable=False, server_default=text("'IMPORTED'")
+    )
