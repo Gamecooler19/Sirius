@@ -240,3 +240,115 @@ already-verified endpoints rather than a synthetic fixture.
       already-known-excluded role.
 - [x] No sensitive-field leakage, verified via the full OpenAPI schema.
 - [x] Report committed as `reports/module-05-reconciliation.md`.
+
+## Follow-up verification
+
+Two gaps in this module's own original verification, closed against the
+live stack using already-seeded data driven through already-verified
+endpoints — no fresh fixtures. Both checks confirmed the existing design;
+neither surfaced a real defect, so no code change was needed.
+
+### 1. A finance_record with zero payment_claims — the case Query B's join was never actually tested against
+
+Every cycle checked in the original verification (`Fall2026`,
+`Spring2027`) already had at least one `payment_claim` by the time
+`GET /finance/reconciliation` was called against it. That leaves a real
+gap: Query B (`payment_claim` joined through `finance_record` to reach
+`applicant.intake_cycle`) produces zero rows for a `finance_record` with
+no claims at all, since it is an inner join rooted at `payment_claim`
+itself — the router's own docstring for Query A vs. Query B never
+actually exercised the case where a cycle's `finance_record` data (Query
+A) has no corresponding rows at all in Query B's output for that cycle.
+The theoretical risk: if the Python merge logic in
+`get_reconciliation` were keyed off Query B's own cycle set rather than
+Query A's, or if `claims_by_status`'s three-status list were built by
+iterating only the statuses Query B actually returned for a cycle
+instead of unconditionally looping over `_ALL_CLAIM_STATUSES`, a
+zero-claim `finance_record` could either make its whole cycle silently
+vanish from the response, or make `claims_by_status` come back
+incomplete (missing entries for statuses genuinely absent from that
+cycle) rather than complete with explicit `count: 0` entries.
+
+One of Module 04's own already-seeded, still-untouched counselor-A `CS`
+applicants (`M4 Applicant A02`, `IMPORTED`) was walked through the real
+`POST /applicants/{id}/status` endpoint, `IMPORTED -> APPLIED ->
+IN_PROCESS -> ADMISSION_OFFERED -> ADMISSION_TAKEN`, four genuine HTTP
+calls, firing the trigger-created `finance_record` the same way every
+prior module's own setup did. `total_fee_due` was set to `300000.00` via
+direct `psql` (again, the only way to set this field today — no endpoint
+writes it). **No payment_claim was submitted against this
+finance_record at all.**
+
+`GET /finance/reconciliation` (`Fall2026`, this applicant's own cycle,
+same cycle Module 03's original applicant already belongs to) returned:
+`finance_record_count: 2` (Module 03's original `1` plus this one),
+`total_fee_due: "800000.00"` (`500000.00 + 300000.00`), `total_paid`
+unchanged at `"100000.00"` (this new record contributed `0`),
+`outstanding: "700000.00"`. Crucially, `claims_by_status` still carried
+all three statuses -- `PENDING: {count: 0, amount: "0"}`, `CONFIRMED:
+{count: 1, amount: "100000.00"}`, `REJECTED: {count: 1, amount:
+"50000.00"}` -- **exactly unchanged from before this zero-claim
+finance_record was added**, confirming the new record did not disturb,
+duplicate, or drop the cycle's existing claim breakdown, and did not
+itself make the cycle disappear from the `cycles` array. `psql` ground
+truth (`SELECT count(*), sum(total_fee_due), sum(total_paid) FROM
+finance_record` = `3, 1000000.00, 175000.00` at this point, across both
+cycles) matched the endpoint's combined `Fall2026`+`Spring2027`
+`finance_record_count`/totals exactly. The cycle did not go missing and
+`claims_by_status` was not incomplete — Query A's own cycle set (not
+Query B's) is what actually drives which cycles appear in the response,
+and `_ALL_CLAIM_STATUSES` is unconditionally iterated per cycle
+regardless of what Query B returned for it, exactly as the router's own
+code (not merely its docstring) already specified. No code change
+needed.
+
+### 2. A genuinely nonzero PENDING entry, and totals holding with three data points
+
+Every `claims_by_status` entry verified in the original report was
+either `CONFIRMED`, `REJECTED`, or a `PENDING` bucket that was correctly
+`{count: 0, amount: 0}` because no `PENDING` claim existed anywhere in
+the seeded data at the time. That leaves the `PENDING` bucket's non-zero
+path unverified — whether Query B's `GROUP BY ... , payment_claim.status`
+genuinely produces a distinct, correctly-summed row for `PENDING` claims
+specifically, not merely that the code *would* handle one if it existed.
+
+`FINANCE_STAFF` submitted a real `120000.00` `CHEQUE` claim (`POST
+/finance/payment-claims`) against the zero-claim `finance_record` from
+check 1 above, and it was **deliberately left unconfirmed** — no `POST
+.../confirm` call was made, so the claim remains genuinely `PENDING`,
+not merely constructed to look that way.
+
+`psql` ground truth for `Fall2026` after this submission: `PENDING`
+1 claim / `120000.00`, `CONFIRMED` 1 claim / `100000.00`, `REJECTED` 1
+claim / `50000.00`. `GET /finance/reconciliation` returned exactly this
+for `Fall2026`'s `claims_by_status`: `PENDING: {count: 1, amount:
+"120000.00"}`, `CONFIRMED: {count: 1, amount: "100000.00"}`, `REJECTED:
+{count: 1, amount: "50000.00"}` -- the `CONFIRMED`/`REJECTED` entries
+unchanged from before, confirming the new `PENDING` claim was correctly
+bucketed into its own status rather than miscounted into either of the
+other two. `total_paid` for `Fall2026` remained `"100000.00"`, unchanged
+-- confirming a `PENDING` claim correctly does not touch
+`finance_record.total_paid` (Module 03's rollup trigger only fires on
+`CONFIRMED`), and this endpoint reports that state accurately rather
+than conflating "claimed" with "paid."
+
+`totals` with all three data points present (Module 03's original
+Fall2026 claims, the new zero-claim-then-one-PENDING-claim Fall2026
+`finance_record`, and Spring2027's `finance_record`/claim from the
+original report's own follow-up): `claims_by_status` of `PENDING: {count:
+1, amount: "120000.00"}` (`1 + 0`), `CONFIRMED: {count: 2, amount:
+"175000.00"}` (`1 + 1`, `100000.00 + 75000.00`), `REJECTED: {count: 1,
+amount: "50000.00"}` (`1 + 0`) -- every totals field checked individually
+against the sum of the two `cycles` rows, all exactly correct.
+`finance_record_count: 3` (`2 + 1`), `total_fee_due: "1000000.00"`
+(`800000.00 + 200000.00`), `total_paid: "175000.00"` (`100000.00 +
+75000.00`), `outstanding: "825000.00"` (`700000.00 + 125000.00`) -- the
+sum-of-cycles property continues to hold exactly with a third
+finance_record and a genuinely mixed three-status claim set present, not
+only in the original two-cycle, two-status case. No code change needed.
+
+Both checks confirm the existing query/merge design handles the
+zero-claims and genuinely-PENDING cases correctly, exactly as reasoned
+through in the original router docstring -- neither was a mere
+assumption that happened to go unexercised until now.
+
