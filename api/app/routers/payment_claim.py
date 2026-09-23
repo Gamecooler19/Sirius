@@ -58,7 +58,7 @@ auto-create trigger.
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -72,8 +72,29 @@ from app.schemas.payment_claim import (
     PaymentClaimResponse,
     PaymentClaimSubmitRequest,
 )
+from app.schemas.reads import PaymentClaimDetail, PaymentClaimListResponse
 
 router = APIRouter(prefix="/finance/payment-claims", tags=["finance"])
+
+# Same four roles as payment_claim's own role_visibility RLS policy
+# (migration 0003/0009). The list endpoint (module 04) enforces this
+# explicitly at the application layer, ahead of RLS, so a role outside
+# this allowlist gets a clean 403 -- not a 200 with an empty `items` list
+# that would otherwise be indistinguishable from "you're allowed to look,
+# there's just nothing to see." The table's own RLS policy would produce
+# exactly that empty-list result if this role check were absent (RLS
+# fails closed, never raises), but for a *list* endpoint specifically
+# (unlike the single-applicant reads in `applicants_read.py`, where "no
+# role restriction, let RLS narrow the rows" is the deliberate design),
+# an explicit 403 is the more honest response for a role that was never
+# meant to reach this endpoint at all -- verified live which of the two
+# actually fires; see the module-04 report.
+_LIST_ROLES = (
+    RoleCode.SUPER_ADMIN,
+    RoleCode.FINANCE_STAFF,
+    RoleCode.FINANCE_MANAGER,
+    RoleCode.AUDITOR,
+)
 
 
 def _to_response(claim: PaymentClaim) -> PaymentClaimResponse:
@@ -88,6 +109,70 @@ def _to_response(claim: PaymentClaim) -> PaymentClaimResponse:
         confirmed_by=claim.confirmed_by,
         confirmed_at=claim.confirmed_at,
         note=claim.note,
+    )
+
+
+@router.get("", response_model=PaymentClaimListResponse)
+async def list_payment_claims(
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    claim_status: PaymentClaimStatus | None = Query(None, alias="status"),
+    user_and_db: tuple[User, AsyncSession] = Depends(require_role_session(*_LIST_ROLES)),
+) -> PaymentClaimListResponse:
+    """Standalone list, independent of any single applicant/finance_record
+    -- for finance/audit roles to triage without needing an applicant id
+    first. Filterable by `status` (`PENDING`/`CONFIRMED`/`REJECTED`).
+
+    RLS still applies underneath this endpoint's own `_LIST_ROLES` role
+    gate (the two are not redundant: the role gate rejects an
+    out-of-scope caller with a 403 before any query runs; RLS is what
+    would otherwise silently narrow the *rows* for an in-scope caller if
+    a future policy ever became row-level rather than role-level for this
+    table -- today `payment_claim`'s policy is a flat role allowlist with
+    no per-row narrowing, so every role in `_LIST_ROLES` sees every claim,
+    but the RLS layer is not bypassed to get that result).
+    """
+    _, db = user_and_db
+
+    filters = []
+    if claim_status is not None:
+        filters.append(PaymentClaim.status == claim_status)
+
+    count_query = select(func.count()).select_from(PaymentClaim)
+    for f in filters:
+        count_query = count_query.where(f)
+    total = (await db.execute(count_query)).scalar_one()
+
+    list_query = (
+        select(PaymentClaim)
+        .order_by(PaymentClaim.created_at.asc(), PaymentClaim.id.asc())
+        .limit(limit)
+        .offset(offset)
+    )
+    for f in filters:
+        list_query = list_query.where(f)
+    rows = (await db.execute(list_query)).scalars().all()
+
+    return PaymentClaimListResponse(
+        items=[
+            PaymentClaimDetail(
+                id=c.id,
+                finance_record_id=c.finance_record_id,
+                amount=c.amount,
+                status=c.status,
+                payment_mode=c.payment_mode,
+                reference_number=c.reference_number,
+                submitted_by=c.submitted_by,
+                confirmed_by=c.confirmed_by,
+                confirmed_at=c.confirmed_at,
+                note=c.note,
+                created_at=c.created_at,
+            )
+            for c in rows
+        ],
+        total=total,
+        limit=limit,
+        offset=offset,
     )
 
 
