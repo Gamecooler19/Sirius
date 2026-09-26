@@ -3,3 +3,88 @@
    See: https://tailwindcss.com/docs/preflight#disabling-preflight */
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
+@import "./fonts.css";
+
+/**
+ * Module 12 visual redesign: global motion and interaction polish.
+ *
+ * Every rule below animates only `transform`/`opacity` (GPU-only
+ * properties, per Emil Kowalski's performance rules -- animating
+ * `width`/`height`/`top`/`left` triggers layout+paint, not just
+ * composite), stays under 300ms (the "UI animations should stay under
+ * 300ms" rule), uses a real cubic-bezier ease-out rather than the weak
+ * built-in CSS easings, and is wrapped in `prefers-reduced-motion`
+ * per the mandatory accessibility rule both `emil-design-eng` and
+ * `redesign-existing-projects` require.
+ *
+ * Deliberately NOT applied: any animation on a keyboard-triggered action
+ * or a 100+/day interaction (Emil's frequency rule) -- table row hover
+ * and button press are tens-of-times-a-day at most for this app's real
+ * usage pattern, well within the "standard animation" band, not the
+ * "no animation ever" band reserved for command palettes / keyboard
+ * shortcuts.
+ */
+
+:root {
+  /* Strong ease-out for UI interactions -- built-in CSS ease-out is too
+     weak to feel intentional (see emil-design-eng skill). */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Buttons must feel responsive to press (Emil Kowalski). Subtle scale,
+     not the more aggressive 0.95 reserved for bigger touch targets. */
+  .mantine-Button-root,
+  .mantine-ActionIcon-root,
+  .mantine-UnstyledButton-root {
+    transition: transform 140ms var(--ease-out), box-shadow 140ms var(--ease-out);
+  }
+  .mantine-Button-root:active,
+  .mantine-ActionIcon-root:active {
+    transform: scale(0.97);
+  }
+
+  /* Table rows: hover is a frequent, low-stakes interaction (Emil's
+     "tens of times/day" band) -- background-color transition only, no
+     transform, since shifting row geometry on hover reads as jittery in
+     a dense data table. */
+  .mantine-TableTr-tr {
+    transition: background-color 120ms ease;
+  }
+
+  /* NavLink active/hover state -- same reasoning as table rows. */
+  .mantine-NavLink-root {
+    transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out);
+  }
+
+  /* Badges and status pills: no motion needed (they don't have an
+     interactive state), left un-animated intentionally.
+
+     Drawer/Modal open-close: tuned explicitly via `transitionProps` on
+     the Drawer itself (`ApplicantDetailDrawer.tsx`), not here -- Mantine's
+     Transition component needs the duration/easing passed as props, not
+     targetable by a global CSS rule. */
+}
+
+/* Reduced motion: keep opacity/color transitions (they aid comprehension
+   without inducing motion sickness), drop every transform-based one. */
+@media (prefers-reduced-motion: reduce) {
+  .mantine-Button-root,
+  .mantine-ActionIcon-root,
+  .mantine-UnstyledButton-root,
+  .mantine-Button-root:active,
+  .mantine-ActionIcon-root:active {
+    transition: none;
+    transform: none;
+  }
+}
+
+/* Tabular figures for money/ID/count fields -- set via the `ff="monospace"`
+   prop already used in FinancePage/ImportUploadPage (now resolving to the
+   self-hosted Geist Mono, not a system monospace fallback), plus
+   `font-variant-numeric: tabular-nums` globally so numbers in the same
+   column visually align even in the default (Geist Sans) font, per the
+   redesign skill's "Numbers in proportional font" fix. */
+body {
+  font-variant-numeric: tabular-nums;
+}

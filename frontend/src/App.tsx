@@ -2,6 +2,7 @@ import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AppRouter } from "./app/router";
 import { ApiError } from "./api/client";
+import { theme } from "./theme";
 
 /** No 4xx status is worth retrying -- a 401 (no session), 403 (wrong
  * role), 404 (not found/RLS-invisible), or 422 (validation) all mean the
@@ -30,7 +31,7 @@ const queryClient = new QueryClient({
 
 export default function App() {
   return (
-    <MantineProvider>
+    <MantineProvider theme={theme}>
       <QueryClientProvider client={queryClient}>
         <AppRouter />
       </QueryClientProvider>

@@ -51,6 +51,15 @@ export function ApplicantDetailDrawer({ applicantId, onClose }: Props) {
       title="Applicant detail"
       position="right"
       size="lg"
+      transitionProps={{
+        // Emil Kowalski: drawers/modals sit in the 200-500ms band, and
+        // entering elements use ease-out (starts fast, feels responsive)
+        // -- `slide-left` is the direction Mantine already uses for a
+        // `position="right"` drawer, so this only tunes duration/easing,
+        // not the direction itself.
+        duration: 220,
+        timingFunction: "cubic-bezier(0.23, 1, 0.32, 1)",
+      }}
     >
       {applicantId !== null && <DrawerContent applicantId={applicantId} />}
     </Drawer>

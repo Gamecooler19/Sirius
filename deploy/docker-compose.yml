@@ -175,3 +175,48 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # Module 12: containerized frontend running Vite's own dev server
+  # directly -- no build step, no nginx/Caddy, no reverse proxy of any
+  # kind. Bound to 127.0.0.1 the same loopback-only way every other
+  # service already publishes (api, rustfs), not 0.0.0.0. The browser
+  # (not this container) makes every API call, so it still reaches `api`
+  # via the same host-published `127.0.0.1:38210` as before -- the
+  # frontend's own `VITE_API_BASE_URL` default already matches; the only
+  # thing that actually changes for the backend is that `CORS_ORIGINS`
+  # must allow whatever origin the browser loads this container's dev
+  # server from, which is unchanged (`http://127.0.0.1:5173`, the same
+  # loopback port Module 06's host-run `npm run dev` already used) --
+  # verified live in this module's own report, not assumed from the port
+  # number matching.
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # CHOKIDAR_USEPOLLING: Vite's file watcher relies on inotify events
+      # that don't cross a bind-mount boundary reliably on every host
+      # filesystem; polling is the standard fallback for hot-reload to
+      # keep working when the source tree is bind-mounted into the
+      # container (see the `volumes:` bind mount below).
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      # Bind-mount the real source tree so `npm run dev`'s hot-reload
+      # actually reflects host edits, matching the same live-editing
+      # workflow Module 06-10 already had running the dev server
+      # directly on the host -- an image rebuild-per-edit loop would be
+      # a genuine regression for local development.
+      - ../frontend:/app
+      # Anonymous volume over node_modules so the host's own
+      # node_modules (a different OS/architecture's native binaries in
+      # some dependencies) never shadows the container's own `npm ci`
+      # install.
+      - /app/node_modules
+    ports:
+      - "127.0.0.1:5173:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - sirius-net
