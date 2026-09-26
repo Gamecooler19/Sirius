@@ -239,3 +239,87 @@ the actual enforcement point for every access decision this module's UI
 merely reflects or hides controls for. Reconciliation reporting (Module
 05's `GET /reconciliation` endpoints) has no frontend UI in this module —
 out of scope until a future module, if any, covers it.
+
+## Follow-up verification
+
+Two gaps in this module's own original verification, closed against the
+same live stack using the claims already sitting in it from this module
+and Module 03 — no new fixtures created for either. Both confirmed the
+existing design; neither surfaced a real defect, so no code change was
+needed.
+
+### 1. The status filter genuinely narrows the queue server-side, not silently ignored
+
+The original report exercised `usePaymentClaimsList`'s `status` param
+only implicitly, by observing which claims a given role could act on —
+never by independently counting a status in the database first and
+confirming the *filtered* UI result matches that count exactly, as
+distinct from just "looking plausible."
+
+Six real claims existed in the live database from this module and Module
+03's combined activity: `psql GROUP BY status` gave
+**PENDING: 1, CONFIRMED: 3, REJECTED: 2** — counted independently,
+before touching the UI at all. Logged in as `m3-financemanager@...`
+(`FINANCE_MANAGER`), the unfiltered `/finance` queue showed all 6 rows
+("Showing 1-6 of 6"). Selecting the `PENDING` filter produced
+**"Showing 1-1 of 1"**, the single row being the real `120000.00 CHEQUE`
+claim (`M5F-TXN-001`) — matching the independent count of 1 exactly, not
+merely "fewer than 6." Selecting `CONFIRMED` next produced
+**"Showing 1-3 of 3"**, all three rows genuinely `CONFIRMED` by their
+badge and none `PENDING`/`REJECTED` — matching the independent count of
+3 exactly. Together these two checks prove the `status` query param
+reaches the real backend and narrows the result set to the exact
+database-side count in both directions (down to 1, and to a different
+non-trivial value of 3), rather than the parameter being silently
+dropped and the UI still rendering all 6 (or some accidentally-cached
+stale set). No code change needed.
+
+### 2. A stale review-queue row surfaces the real "not PENDING" 422, not a silent failure or a crash
+
+The original report's maker-checker verification always resolved a claim
+from the *only* browser session that had it loaded — it never left a
+second, unrefreshed browser tab sitting on a `PENDING` row with a live
+Confirm button after that same claim was resolved by someone else
+through a completely different session, the exact "stale queue" race
+Module 07's own follow-up used for a stale status transition.
+
+Logged in as `m3-financemanager@...` in the browser and loaded `/finance`
+filtered to `PENDING`: exactly the one row from check 1 above
+(`120000.00 CHEQUE`, `M5F-TXN-001`, id `d8d3aa72-4a3a-486d-9fdc-36d06d3160da`),
+with a live, enabled Confirm button rendered. Without that tab refetching
+anything, authenticated a genuinely separate session as
+`m3-financemanager2@...` via real `curl` calls against the live backend
+(`POST /auth/login` then `POST /auth/totp/verify` with a freshly
+generated real TOTP code) and called
+**`POST /finance/payment-claims/d8d3aa72-4a3a-486d-9fdc-36d06d3160da/reject`**
+directly against that session — 200, the backend's real response showing
+`status: "REJECTED"`, `confirmed_by` = manager #2's real id. A `psql`
+check immediately confirmed this genuinely landed in the database:
+`status = REJECTED`, `confirmed_by = 1c08c67d-7f8e-4a18-91f1-bb1dfb5c804b`
+(manager #2), a real `confirmed_at` timestamp.
+
+The first browser tab (manager #1) was never touched during that second
+session's call and still showed the row as `PENDING` with its Confirm
+button live — screenshotted to record the stale state before proceeding.
+Clicking that stale Confirm button produced a row-level red `Alert`
+reading exactly:
+
+> payment claim is not PENDING (current status: REJECTED)
+
+— the real backend's own text, in the identical row-error `Alert` shape
+`FinancePage.tsx` already uses for the maker-checker 422 (see the
+original report's manager #1 self-confirm case), not a silent failure,
+not a stuck loading spinner, and not a crash. A `psql` check immediately
+afterward confirmed the stale click altered nothing further:
+`status` still `REJECTED`, `confirmed_by` still manager #2's id, and
+`confirmed_at` still the exact same timestamp as before the stale
+click — the failed mutation genuinely touched zero rows, it did not,
+for instance, silently overwrite `confirmed_by` back to manager #1 or
+bump `confirmed_at` before the backend's own PENDING check rejected it.
+Reloading the page afterward correctly showed the claim as `REJECTED`,
+resolved by manager #2, confirming the earlier stale render was purely a
+client-side cache artifact of not having refetched, not a genuine
+data inconsistency. No code change needed — this is
+`useResolvePaymentClaim`'s existing `ApiError`-surfacing path (the same
+one the maker-checker case already exercised) correctly handling a
+different backend rejection reason without any special-casing required.
