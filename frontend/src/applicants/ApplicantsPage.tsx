@@ -22,12 +22,13 @@ import {
   Loader,
   Center,
 } from "@mantine/core";
-import { WarningCircle } from "@phosphor-icons/react";
+import { WarningCircle, UsersThree } from "@phosphor-icons/react";
 import { ApiError } from "../api/client";
 import type { ApplicationStatus } from "../api/types";
 import { useApplicantsList } from "./useApplicants";
 import { ALL_STATUSES } from "./statusTransitions";
 import { ApplicantDetailDrawer } from "./ApplicantDetailDrawer";
+import { EmptyState } from "../components/EmptyState";
 
 const PAGE_SIZE = 10;
 
@@ -148,10 +149,12 @@ export function ApplicantsPage() {
               ))}
               {query.data.items.length === 0 && (
                 <Table.Tr>
-                  <Table.Td colSpan={5}>
-                    <Text c="dimmed" ta="center" py="md">
-                      No applicants match these filters.
-                    </Text>
+                  <Table.Td colSpan={5} style={{ cursor: "default" }}>
+                    <EmptyState
+                      icon={UsersThree}
+                      title="No applicants match these filters"
+                      body="Try clearing a filter, or check back once the next import batch has run."
+                    />
                   </Table.Td>
                 </Table.Tr>
               )}

@@ -25,12 +25,13 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
-import { CheckCircle, WarningCircle } from "@phosphor-icons/react";
+import { CheckCircle, WarningCircle, CurrencyCircleDollar } from "@phosphor-icons/react";
 import { ApiError } from "../api/client";
 import type { PaymentMode } from "../api/types";
 import { useMe } from "../api/useMe";
 import { PAYMENT_SUBMIT_ROLES, hasRole } from "../auth/roles";
 import { useApplicantFinance, useSubmitPaymentClaim } from "./useFinance";
+import { EmptyState } from "../components/EmptyState";
 
 const PAYMENT_MODES: PaymentMode[] = ["CASH", "CHEQUE", "BANK_TRANSFER", "UPI", "CARD", "OTHER"];
 
@@ -129,9 +130,11 @@ export function ApplicantFinanceSection({ applicantId }: { applicantId: string }
       </Group>
 
       {finance.payment_claims.length === 0 ? (
-        <Text size="sm" c="dimmed">
-          No payment claims submitted yet.
-        </Text>
+        <EmptyState
+          icon={CurrencyCircleDollar}
+          title="No payment claims submitted yet"
+          body="Claims submitted against this applicant's finance record will appear here."
+        />
       ) : (
         <Table striped withTableBorder>
           <Table.Thead>

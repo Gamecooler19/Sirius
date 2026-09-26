@@ -25,12 +25,13 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { Check, WarningCircle, X } from "@phosphor-icons/react";
+import { Check, WarningCircle, X, CurrencyCircleDollar } from "@phosphor-icons/react";
 import { ApiError } from "../api/client";
 import type { PaymentClaimStatus } from "../api/types";
 import { useMe } from "../api/useMe";
 import { PAYMENT_RESOLVE_ROLES, hasRole } from "../auth/roles";
 import { usePaymentClaimsList, useResolvePaymentClaim } from "./useFinance";
+import { EmptyState } from "../components/EmptyState";
 
 const PAGE_SIZE = 10;
 
@@ -197,9 +198,11 @@ export function FinancePage() {
               {query.data.items.length === 0 && (
                 <Table.Tr>
                   <Table.Td colSpan={canResolve ? 8 : 7}>
-                    <Text c="dimmed" ta="center" py="md">
-                      No payment claims match this filter.
-                    </Text>
+                    <EmptyState
+                      icon={CurrencyCircleDollar}
+                      title="No payment claims match this filter"
+                      body="Try clearing the status filter, or check back once a claim has been submitted."
+                    />
                   </Table.Td>
                 </Table.Tr>
               )}

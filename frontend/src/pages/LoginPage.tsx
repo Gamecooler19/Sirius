@@ -14,6 +14,13 @@
  * All three states share one component so the transition between them
  * (a session that started as case 2 and just finished confirming) can
  * fall straight through to "authenticated" without a page reload.
+ *
+ * Module 13: page background moves from Mantine's `gray.0` to Steel
+ * Surface (#f3f8fa, DESIGN.md SS2), the card gains the Sirius mark above
+ * its title (matching the new favicon/app-shell wordmark), and the
+ * primary button now renders in Harbor Cobalt via `theme.ts` rather than
+ * v1's teal -- no change to the auth flow, request shapes, or state
+ * machine below.
  */
 
 import { useState } from "react";
@@ -44,6 +51,17 @@ import {
   useTotpEnrollStart,
   useTotpVerify,
 } from "../api/useAuth";
+
+function SiriusMark() {
+  return (
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 1L14.5 9.5L23 12L14.5 14.5L12 23L9.5 14.5L1 12L9.5 9.5L12 1Z"
+        fill="#005681"
+      />
+    </svg>
+  );
+}
 
 type Stage =
   | { kind: "credentials" }
@@ -111,12 +129,15 @@ export function LoginPage() {
   }
 
   return (
-    <Center mih="100vh" bg="gray.0">
-      <Card shadow="sm" padding="xl" radius="md" withBorder w={420}>
+    <Center mih="100vh" bg="#f3f8fa">
+      <Card shadow="sm" padding="xl" radius="lg" withBorder w={420}>
         <Stack gap="md">
-          <Title order={2} ta="center">
-            Sirius
-          </Title>
+          <Stack gap={4} align="center">
+            <SiriusMark />
+            <Title order={2} ta="center">
+              Sirius
+            </Title>
+          </Stack>
 
           {error && (
             <Alert color="red" icon={<WarningCircle size={20} weight="light" />}>

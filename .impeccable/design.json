@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-27T00:00:00Z",
+  "title": "Design System: Sirius",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Harbor Cobalt",
+        "canonical": "oklch(0.420 0.120 230.0)",
+        "tonalRamp": ["#000a33", "#002f57", "#00517b", "#006e9a", "#1292c0", "#4ab8e8", "#71dcff", "#93feff"]
+      },
+      "accent-amber": {
+        "role": "secondary",
+        "displayName": "Fog Amber",
+        "canonical": "oklch(0.550 0.150 70.0)",
+        "tonalRamp": ["#280000", "#4e1200", "#723500", "#915200", "#b77610", "#df9b44", "#ffbe69", "#ffdf8a"]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Steel Surface",
+        "canonical": "oklch(0.975 0.006 230.0)"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Deep Harbor Ink",
+        "canonical": "oklch(0.200 0.020 230.0)"
+      }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Headline", "purpose": "Page titles only (Applicants, Finance, Reconciliation). One per screen." },
+      "title": { "displayName": "Title", "purpose": "Section headers within a page: drawer headings, card-group titles." },
+      "label": { "displayName": "Label", "purpose": "Form labels, table headers, nav items, button text." },
+      "body": { "displayName": "Body", "purpose": "Default text: table cells, paragraph copy, drawer body." },
+      "mono": { "displayName": "Mono", "purpose": "Every money amount, ID, timestamp, and count -- tabular numerals on." }
+    },
+    "shadows": [
+      { "name": "panel", "value": "0 1px 0 0 #d9dfe2", "purpose": "Hairline separator between the nav/header plane and content. The default elevation state for 95% of the interface." },
+      { "name": "overlay", "value": "-8px 0 24px rgba(12, 24, 29, 0.10)", "purpose": "The applicant-detail drawer sliding in over content -- the one real elevation in the system." },
+      { "name": "focus-ring", "value": "0 0 0 2px #ffffff, 0 0 0 4px #005681", "purpose": "Double ring (white gap + cobalt ring) on every keyboard-focusable element." }
+    ],
+    "motion": [
+      { "name": "ease-standard", "value": "cubic-bezier(0.23, 1, 0.32, 1)", "purpose": "Strong ease-out for button press, nav hover, and the drawer's own entrance -- carried forward from the v1 redesign's motion research, unchanged by this pass." },
+      { "name": "duration-press", "value": "140ms", "purpose": "Button :active scale(0.97) feedback." },
+      { "name": "duration-drawer", "value": "220ms", "purpose": "Applicant-detail drawer open/close." }
+    ],
+    "breakpoints": [
+      { "name": "mobile", "value": "768px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one primary action per screen -- Sign in, Apply transition, Upload.",
+      "html": "<button class=\"ds-btn-primary\">Sign in</button>",
+      "css": ".ds-btn-primary { background: #005681; color: #ffffff; padding: 8px 16px; font: 500 13px/1.4 Geist, -apple-system, sans-serif; border: none; border-radius: 6px; transition: background 140ms cubic-bezier(0.23,1,0.32,1), transform 140ms cubic-bezier(0.23,1,0.32,1); cursor: pointer; } .ds-btn-primary:hover { background: #004573; } .ds-btn-primary:active { background: #003a5f; transform: scale(0.97); } .ds-btn-primary:focus-visible { box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #005681; outline: none; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Every non-primary action: Logout, Cancel, secondary filters.",
+      "html": "<button class=\"ds-btn-secondary\">Logout</button>",
+      "css": ".ds-btn-secondary { background: #f3f8fa; color: #0c181d; padding: 8px 16px; font: 500 13px/1.4 Geist, -apple-system, sans-serif; border: none; border-radius: 6px; transition: background 140ms cubic-bezier(0.23,1,0.32,1), transform 140ms cubic-bezier(0.23,1,0.32,1); cursor: pointer; } .ds-btn-secondary:hover { background: #ebf1f4; } .ds-btn-secondary:active { transform: scale(0.97); }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "Standard form field -- login email/password, applicant filters.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"you@sirius.app\" />",
+      "css": ".ds-input { background: #ffffff; color: #0c181d; border: 1px solid #d9dfe2; border-radius: 6px; padding: 8px 12px; font: 400 14px/1.5 Geist, -apple-system, sans-serif; transition: border-color 140ms ease; } .ds-input::placeholder { color: #58666d; } .ds-input:focus { border-color: #005681; box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #005681; outline: none; }"
+    },
+    {
+      "name": "Nav Item (Active)",
+      "kind": "nav",
+      "refersTo": "nav-item-active",
+      "description": "The current section in the sidebar -- Harbor Cobalt Subtle background, the one place navigation earns the brand color.",
+      "html": "<a class=\"ds-nav-item ds-nav-item--active\" href=\"#\">Applicants</a>",
+      "css": ".ds-nav-item { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 6px; font: 500 13px/1.4 Geist, -apple-system, sans-serif; color: #0c181d; text-decoration: none; transition: background 140ms cubic-bezier(0.23,1,0.32,1), color 140ms cubic-bezier(0.23,1,0.32,1); } .ds-nav-item:hover { background: #ebf1f4; } .ds-nav-item--active, .ds-nav-item--active:hover { background: #e5f3fa; color: #005681; }"
+    },
+    {
+      "name": "Status Chip (Fog Amber)",
+      "kind": "chip",
+      "refersTo": "accent-amber-chip",
+      "description": "The one reserved role for the brand's secondary hue -- a flagged row, a note requiring review. Never used for a primary action.",
+      "html": "<span class=\"ds-chip-amber\">Flagged</span>",
+      "css": ".ds-chip-amber { display: inline-flex; align-items: center; background: #feebd6; color: #6c3a00; font: 500 12px/1.3 Geist, -apple-system, sans-serif; padding: 2px 8px; border-radius: 6px; }"
+    },
+    {
+      "name": "Empty State",
+      "kind": "custom",
+      "refersTo": "empty-state",
+      "description": "The signature component this redesign pass adds: a composed icon + headline + body inside a Steel Surface card, used on every list/table screen that can be legitimately empty.",
+      "html": "<div class=\"ds-empty-state\"><svg class=\"ds-empty-icon\" width=\"32\" height=\"32\" viewBox=\"0 0 256 256\" fill=\"#58666d\"><path d=\"M117.25,157.92a60,60,0,1,0-66.5,0A95.83,95.83,0,0,0,3.53,195.63a8,8,0,1,0,13.4,8.74,80,80,0,0,1,134.14,0,8,8,0,0,0,13.4-8.74A95.83,95.83,0,0,0,117.25,157.92ZM40,108a44,44,0,1,1,44,44A44.05,44.05,0,0,1,40,108Zm210.14,98.7a8,8,0,0,1-11.07-2.33A79.83,79.83,0,0,0,172,168a8,8,0,0,1,0-16,44,44,0,1,0-16.34-84.87,8,8,0,1,1-5.94-14.85,60,60,0,0,1,55.53,105.64,95.83,95.83,0,0,1,47.22,37.71A8,8,0,0,1,250.14,206.7Z\"/></svg><h3 class=\"ds-empty-title\">No applicants yet</h3><p class=\"ds-empty-body\">Applicants will appear here once imported or added.</p></div>",
+      "css": ".ds-empty-state { display: flex; flex-direction: column; align-items: center; text-align: center; background: #f3f8fa; border-radius: 12px; padding: 40px; gap: 8px; } .ds-empty-icon { margin-bottom: 8px; } .ds-empty-title { font: 600 18px/1.3 Geist, -apple-system, sans-serif; letter-spacing: -0.01em; color: #0c181d; margin: 0; } .ds-empty-body { font: 400 14px/1.5 Geist, -apple-system, sans-serif; color: #58666d; margin: 0; max-width: 42ch; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Harbor Master's Ledger",
+    "overview": "Sirius runs like the office of a harbor master at dawn: cold steel water, fog-muted light, the quiet before the boats leave. Every entry in the ledger is checked twice, every signature is attributable, and nothing is decorative -- the room exists to get the count right, not to impress a visitor. The deep cobalt of pre-dawn water is the only color the interface volunteers on its own; everything else is neutral until a real state (a status, an error, a selection) earns it. This system explicitly rejects the SaaS-marketing-dashboard costume: no hero sections, no gradient-text metrics, no confetti on save. It also rejects the two failure modes of the redesign that preceded it -- Mantine's stock default blue with a teal accent swapped in, and, before that, completely unstyled defaults. Sirius is closer to a bank branch's teller system or a university bursar's ledger than to a startup dashboard: it has been doing this exact job for years and it shows in the confidence of the restraint, not in visual noise.",
+    "keyCharacteristics": [
+      "One brand color (deep cobalt), used sparingly and only where it means something -- primary actions, current navigation, links, focus rings.",
+      "A dense, tabular-numeral, fixed-rem type scale built for real data, not a fluid marketing scale.",
+      "Flat by default; elevation appears only where it communicates real hierarchy (the navigation drawer over content, a modal over the page).",
+      "Semantic status colors (applicant pipeline stages, payment-claim states) are a separate vocabulary from the one brand accent, so the two never collide or get mistaken for each other."
+    ],
+    "rules": [
+      { "name": "The One Signal Rule", "body": "Harbor Cobalt appears exactly once per screen as a rule of thumb: the single primary action, or the single active nav item, or a focus ring -- never as a background wash, never twice competing for attention in the same view.", "section": "colors" },
+      { "name": "The Fixed-Scale Rule", "body": "No clamp(), no fluid viewport-based sizing anywhere in this system. Users view a data-dense tool at a consistent desktop DPI; a fluid headline that shrinks in a sidebar reads as broken, not responsive.", "section": "typography" },
+      { "name": "The Earned Elevation Rule", "body": "A card, panel, or shadow must justify its existence by separating two things a user could otherwise confuse. A card wrapped around content that would read identically without it is a Don't.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do use Harbor Cobalt (#005681) exactly once per screen as the single primary signal -- a button, an active nav item, a focus ring.",
+      "Do render every money/ID/timestamp/count in Geist Mono with tabular numerals so columns of numbers align.",
+      "Do compose a real empty state (icon + headline + one line of body text, inside a Steel Surface card) for every screen that can be legitimately empty.",
+      "Do keep the existing semantic status-badge vocabulary completely separate from the one brand accent.",
+      "Do verify every role gate, RLS-scoped view, and maker-checker control renders identically in behavior before and after this pass."
+    ],
+    "donts": [
+      "Don't use Mantine's stock default blue, or any AI-purple accent.",
+      "Don't use a warm-cream/beige surface anywhere; the neutral ramp stays cool-tinted toward the primary's own cobalt hue.",
+      "Don't wrap list rows, form sections, or anything a hairline divider already separates in a card.",
+      "Don't use border-left/border-right greater than 1px as a colored accent stripe on any element.",
+      "Don't use clamp() or fluid viewport-based type sizing anywhere.",
+      "Don't ship a bare 'No results' text row as an empty state -- every empty state gets the full composed treatment."
+    ]
+  }
+}

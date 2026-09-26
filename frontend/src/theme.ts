@@ -1,73 +1,123 @@
 /**
- * Module 12 visual redesign: Mantine theme overrides. Before this module,
- * `<MantineProvider>` (`App.tsx`) had zero customization -- default blue
- * primary, default radii, default (system) font stack, indistinguishable
- * from a fresh `npx mantine` scaffold. This file is the one place that
- * changes; no component's data-fetching, role gating, or RLS-scoped query
- * logic is touched by anything here.
+ * Module 13 visual redesign (impeccable-only): Mantine theme overrides.
+ * Replaces Module 12's teal palette entirely with the "Harbor Cobalt"
+ * system computed via impeccable's own `palette.mjs --from
+ * "sirius-v2-admissions-finance"` (seed: oklch(0.550 0.105 230deg)) and
+ * documented in full, with every contrast ratio, in `DESIGN.md` at the
+ * repo root -- this file is a direct application of that document, not an
+ * independent design decision made in code.
  *
- * Palette rationale: a cool cyan/teal accent, not Mantine's default blue
- * and not the generic "AI-purple" the redesign skill explicitly flags.
- * Chosen to sit visually apart from every semantic status color already
- * in use across the app (`STATUS_COLORS` in ApplicantsPage/FinancePage:
- * gray/blue/yellow/orange/grape/green/red/dark) so the brand accent never
- * collides with or gets mistaken for a status badge -- a real risk with a
- * generic blue primary sitting next to a blue "APPLIED" badge.
+ * v1 (Module 12) chose teal specifically to sit apart from the app's
+ * existing status-badge colors (gray/blue/yellow/orange/grape/green/red).
+ * v2 keeps that same constraint -- Harbor Cobalt's hue (230deg, a
+ * blue-leaning cobalt) reads as visually distinct from the badge "blue"
+ * (Mantine's own `blue.6`, a brighter cyan-blue) at a glance, and DESIGN.md
+ * Do's/Don'ts explicitly re-affirms the badge vocabulary is untouched.
+ *
+ * Font stack: after this module ran `impeccable detect` against v1's
+ * self-hosted Geist and got a real `overused-font` finding (Geist itself
+ * has become common enough in AI-generated UI to read as a tell), v2 uses
+ * the OS-native system stack instead -- see DESIGN.md SS3 for the full
+ * rationale and the `typeset.md` reference quote it's built on.
  */
 
 import { createTheme, type MantineColorsTuple } from "@mantine/core";
 
-const sirius: MantineColorsTuple = [
-  "#e6fcf9",
-  "#c3f5ee",
-  "#9aece2",
-  "#6de2d5",
-  "#45d9ca",
-  "#22c7b5",
-  "#159e91",
-  "#0c7a70", // primary shade (index 7): 5.21:1 contrast against white,
-  // passes WCAG AA (4.5:1) for the white text Mantine's filled Button
-  // variant uses by default -- shade 5 (#22c7b5, the visually "brightest"
-  // brand teal) was checked first and only hits 2.12:1, a real
-  // accessibility failure caught by computing actual contrast ratios
-  // rather than eyeballing the color, per the redesign skill's mandatory
-  // "Button Contrast Check".
-  "#065c54",
-  "#02423c",
+// Harbor Cobalt: a 10-step OKLCH-derived tonal ramp at hue 230deg, computed
+// from-scratch (Python OKLCH->linear-sRGB->gamma-encoded conversion,
+// verified against DESIGN.md's own hand-checked primary/hover/active
+// values) so shades 0-5 and 9 are a real perceptually-uniform ramp rather
+// than an arbitrary CSS gradient; shades 6-8 are pinned to the exact hex
+// values DESIGN.md already verified for WCAG contrast (7.93:1 / 10.01:1 /
+// 12.1:1+ against white text) so the two documents can never drift apart.
+const harborCobalt: MantineColorsTuple = [
+  "#e7f6ff", // 0
+  "#cbe6f4", // 1
+  "#a0cbe1", // 2
+  "#68a8c7", // 3
+  "#2b85aa", // 4
+  "#00658e", // 5
+  "#005681", // 6 -- primary (DESIGN.md SS2), 7.93:1 white-text contrast
+  "#004573", // 7 -- hover (DESIGN.md SS2), 10.01:1 white-text contrast
+  "#003a5f", // 8 -- active (DESIGN.md SS2), 12.1:1+ white-text contrast
+  "#001f3a", // 9 -- darkest
 ];
 
-export const theme = createTheme({
-  primaryColor: "sirius",
-  colors: { sirius },
-  primaryShade: 7,
+// Fog Amber: the one reserved secondary hue (DESIGN.md SS2), used only for
+// the amber status chip -- never as a Mantine `color` prop on an
+// interactive element, so this tuple exists solely so components that
+// need the raw hex can reference `theme.colors["fog-amber"]` instead of a
+// magic string.
+const fogAmber: MantineColorsTuple = [
+  "#fef3e2",
+  "#feebd6", // 1 -- chip background (DESIGN.md SS2)
+  "#f7d3a8",
+  "#eeb877",
+  "#e19b47",
+  "#c47f22",
+  "#a75d00", // 6 -- accent (DESIGN.md SS2)
+  "#8a4d00",
+  "#6c3a00", // 8 -- chip text (DESIGN.md SS2), 8.06:1 contrast on chip bg
+  "#4a2700",
+];
 
-  fontFamily: "Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-  fontFamilyMonospace:
-    "'Geist Mono', ui-monospace, SFMono-Regular, Consolas, monospace",
+const SYSTEM_SANS =
+  "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
+const SYSTEM_MONO =
+  "ui-monospace, SFMono-Regular, 'Segoe UI Mono', Consolas, monospace";
+
+export const theme = createTheme({
+  primaryColor: "harbor-cobalt",
+  colors: { "harbor-cobalt": harborCobalt, "fog-amber": fogAmber },
+  primaryShade: 6,
+
+  fontFamily: SYSTEM_SANS,
+  fontFamilyMonospace: SYSTEM_MONO,
+
+  // DESIGN.md SS3 hierarchy: Headline/Title/Label/Body/Mono, fixed px
+  // sizes, no fluid clamp() anywhere (the Fixed-Scale Rule).
+  fontSizes: {
+    xs: "0.8125rem", // 13px -- Label
+    sm: "0.875rem", // 14px -- Body
+    md: "0.875rem",
+    lg: "1.125rem", // 18px -- Title
+    xl: "1.5rem", // 24px -- Headline
+  },
 
   headings: {
-    fontFamily: "Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    fontFamily: SYSTEM_SANS,
     fontWeight: "600",
     sizes: {
-      // Tighter tracking + slightly heavier weight than Mantine's default
-      // gives headings real presence without the display-serif or
-      // oversized-hero treatment that would be wrong for a data-dense
-      // admin tool (see this module's report: registry read as "product",
-      // not "landing page").
-      h1: { fontSize: "2rem", lineHeight: "1.2", fontWeight: "700" },
-      h2: { fontSize: "1.5rem", lineHeight: "1.3", fontWeight: "600" },
-      h3: { fontSize: "1.25rem", lineHeight: "1.35", fontWeight: "600" },
-      h4: { fontSize: "1.1rem", lineHeight: "1.4", fontWeight: "600" },
+      // h1 doubles as DESIGN.md's Headline role (24px/700/-0.015em); h2-h4
+      // step down toward Title (18px/600/-0.01em) for in-page sub-sections.
+      h1: {
+        fontSize: "1.5rem",
+        lineHeight: "1.25",
+        fontWeight: "700",
+      },
+      h2: {
+        fontSize: "1.375rem",
+        lineHeight: "1.28",
+        fontWeight: "700",
+      },
+      h3: {
+        fontSize: "1.125rem",
+        lineHeight: "1.3",
+        fontWeight: "600",
+      },
+      h4: {
+        fontSize: "1rem",
+        lineHeight: "1.35",
+        fontWeight: "600",
+      },
     },
   },
 
-  defaultRadius: "md",
+  defaultRadius: "sm",
 
-  // One shape system, applied everywhere (redesign skill: "Pick ONE
-  // corner-radius scale for the page and stick to it"). Mantine's own
-  // "md" token (8px) becomes the single radius every component inherits
-  // by default; nothing below hand-picks a different radius per
-  // component.
+  // DESIGN.md SS5 Buttons: "6px radius (sm) -- sharper than a typical
+  // consumer app... never pill-shaped." Cards get the one exception (lg,
+  // 12px) reserved for the reconciliation summary tiles.
   radius: {
     xs: "4px",
     sm: "6px",
@@ -76,32 +126,55 @@ export const theme = createTheme({
     xl: "16px",
   },
 
+  // DESIGN.md SS4 Elevation: flat by default, earning elevation only for
+  // the nav/content hairline and the applicant-detail drawer overlay.
+  // Mantine's `shadow` prop is still used by a few default components
+  // (Drawer, Popover) so these stay defined, but tinted toward Deep Harbor
+  // Ink (#0c181d) rather than generic black, and kept far more subtle than
+  // v1's teal-tinted shadows -- most surfaces in this system use zero
+  // shadow at all (the Earned Elevation Rule).
   shadows: {
-    // Tinted toward the brand hue rather than pure black, per the
-    // redesign skill ("tint shadows to match the background hue").
-    xs: "0 1px 2px rgba(6, 60, 55, 0.06)",
-    sm: "0 2px 6px rgba(6, 60, 55, 0.08)",
-    md: "0 4px 12px rgba(6, 60, 55, 0.10)",
-    lg: "0 8px 24px rgba(6, 60, 55, 0.12)",
-    xl: "0 16px 40px rgba(6, 60, 55, 0.14)",
+    xs: "0 1px 0 0 #d9dfe2",
+    sm: "0 1px 0 0 #d9dfe2",
+    md: "-8px 0 24px rgba(12, 24, 29, 0.10)",
+    lg: "-8px 0 24px rgba(12, 24, 29, 0.10)",
+    xl: "-8px 0 24px rgba(12, 24, 29, 0.14)",
   },
 
+  // DESIGN.md SS4 Focus Ring: a double ring (white gap + cobalt ring),
+  // applied globally so every keyboard-focusable Mantine control gets it
+  // for free, not just the ones with a manually-added CSS rule.
+  focusRing: "always",
+
   components: {
-    // Emil Kowalski: buttons must feel responsive to press. The actual
-    // scale(0.97) tactile-feedback rule lives in `index.css`
-    // (`.mantine-Button-root:active`), applied globally via CSS rather
-    // than per-component so every button in the app gets it for free,
-    // including ones added by future modules -- no `components.Button`
-    // override needed here for that specific rule.
     Table: {
       defaultProps: {
         verticalSpacing: "sm",
       },
     },
     Card: {
+      // DESIGN.md SS5 Cards: 12px radius (lg) is the one shared shape
+      // token; background/border/shadow are left to each call site
+      // because the Card component is used for two genuinely different
+      // things in this app -- the reconciliation summary tiles (Steel
+      // Surface, no border, no shadow -- background contrast is the whole
+      // signal) and the login page's own elevated card (white, hairline
+      // border, a real earned shadow, since it is the one place in the
+      // app that legitimately floats over a page background). Forcing one
+      // bg/shadow default here would be wrong for one of the two.
       defaultProps: {
         radius: "lg",
       },
     },
+    Badge: {
+      // Existing semantic status vocabulary (SS2 "Status vocabulary") is
+      // untouched -- this only sets the shape (6px radius) every badge
+      // already effectively used, made explicit and consistent.
+      defaultProps: {
+        radius: "sm",
+      },
+    },
   },
 });
+
+export { SYSTEM_SANS, SYSTEM_MONO };

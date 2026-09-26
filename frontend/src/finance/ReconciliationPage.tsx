@@ -21,10 +21,11 @@
  */
 
 import { Alert, Card, Center, Group, Loader, Stack, Table, Text, Title } from "@mantine/core";
-import { WarningCircle } from "@phosphor-icons/react";
+import { WarningCircle, ChartLine } from "@phosphor-icons/react";
 import { ApiError } from "../api/client";
 import type { PaymentClaimStatus, ReconciliationCycle, ReconciliationTotals } from "../api/types";
 import { useReconciliation } from "./useReconciliation";
+import { EmptyState } from "../components/EmptyState";
 
 const STATUS_ORDER: PaymentClaimStatus[] = ["PENDING", "CONFIRMED", "REJECTED"];
 
@@ -160,9 +161,11 @@ export function ReconciliationPage() {
               {sortedCycles.length === 0 && (
                 <Table.Tr>
                   <Table.Td colSpan={8}>
-                    <Text c="dimmed" ta="center" py="md">
-                      No finance records exist yet.
-                    </Text>
+                    <EmptyState
+                      icon={ChartLine}
+                      title="No finance records exist yet"
+                      body="Reconciliation totals will populate here once applicants have finance records to summarize."
+                    />
                   </Table.Td>
                 </Table.Tr>
               )}

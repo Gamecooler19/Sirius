@@ -25,7 +25,7 @@ import {
   Timeline,
   Title,
 } from "@mantine/core";
-import { ArrowRight, CheckCircle, WarningCircle } from "@phosphor-icons/react";
+import { ArrowRight, CheckCircle, WarningCircle, ClockCounterClockwise } from "@phosphor-icons/react";
 import { ApiError } from "../api/client";
 import type { ApplicationStatus } from "../api/types";
 import { useMe } from "../api/useMe";
@@ -37,6 +37,7 @@ import {
   useApplicantStatusHistory,
   useTransitionApplicantStatus,
 } from "./useApplicants";
+import { EmptyState } from "../components/EmptyState";
 
 interface Props {
   applicantId: string | null;
@@ -218,9 +219,11 @@ function DrawerContent({ applicantId }: { applicantId: string }) {
           )}
 
           {history.length === 0 && !historyQuery.isError && (
-            <Text size="sm" c="dimmed">
-              No status changes recorded yet.
-            </Text>
+            <EmptyState
+              icon={ClockCounterClockwise}
+              title="No status changes recorded yet"
+              body="This applicant's status history will appear here as soon as the first transition is made."
+            />
           )}
 
           {history.length > 0 && (

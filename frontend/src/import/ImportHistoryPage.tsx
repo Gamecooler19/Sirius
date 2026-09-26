@@ -22,9 +22,10 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { WarningCircle } from "@phosphor-icons/react";
+import { WarningCircle, ClockCounterClockwise } from "@phosphor-icons/react";
 import { ApiError } from "../api/client";
 import { useImportBatchesList } from "./useImport";
+import { EmptyState } from "../components/EmptyState";
 
 const PAGE_SIZE = 10;
 
@@ -98,9 +99,11 @@ export function ImportHistoryPage() {
               {query.data.items.length === 0 && (
                 <Table.Tr>
                   <Table.Td colSpan={7}>
-                    <Text c="dimmed" ta="center" py="md">
-                      No imports have been run yet.
-                    </Text>
+                    <EmptyState
+                      icon={ClockCounterClockwise}
+                      title="No imports have been run yet"
+                      body="Once an admissions manager uploads an Excel file, the batch will appear here with its create/update/flag counts."
+                    />
                   </Table.Td>
                 </Table.Tr>
               )}

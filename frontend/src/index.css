@@ -3,7 +3,14 @@
    See: https://tailwindcss.com/docs/preflight#disabling-preflight */
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
-@import "./fonts.css";
+
+/**
+ * Module 13 note: no `fonts.css` import here anymore. Module 12
+ * self-hosted Geist via @font-face; running `impeccable detect` against
+ * that choice flagged Geist itself under `overused-font` (see DESIGN.md
+ * SS3 and `theme.ts`'s own header comment for the full story), so v2 uses
+ * the OS-native system-font stack instead and ships zero font files.
+ */
 
 /**
  * Module 12 visual redesign: global motion and interaction polish.
@@ -81,10 +88,32 @@
 
 /* Tabular figures for money/ID/count fields -- set via the `ff="monospace"`
    prop already used in FinancePage/ImportUploadPage (now resolving to the
-   self-hosted Geist Mono, not a system monospace fallback), plus
+   OS-native monospace stack, see `theme.ts`), plus
    `font-variant-numeric: tabular-nums` globally so numbers in the same
-   column visually align even in the default (Geist Sans) font, per the
-   redesign skill's "Numbers in proportional font" fix. */
+   column visually align even in the default (system sans) font, per the
+   `typeset.md` reference's "tabular-nums for data tables" rule. */
 body {
   font-variant-numeric: tabular-nums;
+}
+
+/**
+ * Module 13: DESIGN.md SS4 "Focus Ring" -- a double ring (white gap +
+ * Harbor Cobalt ring), visible against any surface underneath it.
+ * `theme.ts`'s `focusRing: "always"` makes Mantine show a ring on every
+ * keyboard-focusable control regardless of input modality; this rule
+ * overrides Mantine's own default ring color/shape with the exact
+ * DESIGN.md spec (`0 0 0 2px #fff, 0 0 0 4px #005681`) rather than
+ * Mantine's single-color outline.
+ */
+:where(
+    .mantine-Button-root,
+    .mantine-ActionIcon-root,
+    .mantine-UnstyledButton-root,
+    .mantine-NavLink-root,
+    .mantine-Input-input,
+    .mantine-Checkbox-input,
+    .mantine-Radio-radio
+  ):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #005681;
 }
