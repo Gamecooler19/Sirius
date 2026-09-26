@@ -136,30 +136,32 @@ export function ApplicantFinanceSection({ applicantId }: { applicantId: string }
           body="Claims submitted against this applicant's finance record will appear here."
         />
       ) : (
-        <Table striped withTableBorder>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Amount</Table.Th>
-              <Table.Th>Mode</Table.Th>
-              <Table.Th>Reference</Table.Th>
-              <Table.Th>Status</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {finance.payment_claims.map((claim) => (
-              <Table.Tr key={claim.id}>
-                <Table.Td>{claim.amount}</Table.Td>
-                <Table.Td>{claim.payment_mode}</Table.Td>
-                <Table.Td>{claim.reference_number ?? "\u2014"}</Table.Td>
-                <Table.Td>
-                  <Badge color={CLAIM_STATUS_COLORS[claim.status] ?? "gray"} variant="light">
-                    {claim.status}
-                  </Badge>
-                </Table.Td>
+        <Table.ScrollContainer minWidth={420}>
+          <Table striped withTableBorder>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Amount</Table.Th>
+                <Table.Th>Mode</Table.Th>
+                <Table.Th>Reference</Table.Th>
+                <Table.Th>Status</Table.Th>
               </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+            </Table.Thead>
+            <Table.Tbody>
+              {finance.payment_claims.map((claim) => (
+                <Table.Tr key={claim.id}>
+                  <Table.Td>{claim.amount}</Table.Td>
+                  <Table.Td>{claim.payment_mode}</Table.Td>
+                  <Table.Td>{claim.reference_number ?? "\u2014"}</Table.Td>
+                  <Table.Td>
+                    <Badge color={CLAIM_STATUS_COLORS[claim.status] ?? "gray"} variant="light">
+                      {claim.status}
+                    </Badge>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
       )}
 
       {canSubmit && (

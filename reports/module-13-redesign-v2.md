@@ -406,3 +406,156 @@ decided from Module 13's task framing ("Harbor Master's Ledger") rather than
 needing the multi-variant exploration `live` is for. This is a deliberate
 scope choice, not a capability gap: `live.md` exists for cases where the
 design direction itself is undecided.
+
+## Follow-up verification
+
+Two gaps in this module's own original verification, closed against the
+same live stack using freshly-seeded real data driven through the real
+endpoints (Part 1) and against the real running dev server (Part 2). One
+check found and fixed two genuine layout defects; the other hit a real tool
+limitation this session could not clear safely, documented honestly rather
+than claimed as done.
+
+### 1. Table/drawer usability at a real 500px viewport, with actual data
+
+The original Module 13 responsive check used a genuinely empty database
+(Module 11's fresh reset), so every table checked at 500px was rendering
+its `EmptyState` — a single centered card, not a real multi-column data
+grid. That is not the case DESIGN.md's own mobile-treatment claim needs to
+hold up against.
+
+**Seeded real data first**, through the real endpoints, not direct SQL:
+12 applicants via `POST /import/applicants` (a real `.xlsx` built with
+`openpyxl`, deleted after upload), 10 of them driven through real
+`POST /applicants/{id}/status` transitions spanning `APPLIED` → `IN_PROCESS`
+→ `ON_HOLD`/`ADMISSION_OFFERED`/`ADMISSION_TAKEN`/`REJECTED`/`WITHDRAWN` (2
+left at `IMPORTED`), and 3 real payment claims via
+`POST /finance/payment-claims` (2 confirmed via
+`POST /finance/payment-claims/{id}/confirm` as `FINANCE_MANAGER` with a
+live-computed TOTP code, 1 left `PENDING`) against the two
+`ADMISSION_TAKEN` applicants' auto-created `finance_record`s.
+
+**Resized the real Firefox window** (not devtools responsive mode) to
+500px-equivalent via the same Win32 `MoveWindow` approach as the original
+Module 13 check, confirmed via `window.innerWidth` after each resize.
+
+**Found two genuine layout defects, both fixed:**
+
+- **`FinancePage`'s table silently scrolled the whole page, not itself.**
+  At 500px, the 8-column claims table (1062px of real content) had no
+  scroll container of its own (`overflowX: visible` on every ancestor) —
+  the *entire page body* scrolled horizontally instead, dragging the nav
+  and header out of view along with the table, confirmed via
+  `document.body.scrollWidth: 1078` against a 500px viewport. This was the
+  same underlying gap in all 5 tables in the app (`ApplicantsPage`,
+  `FinancePage`, `ReconciliationPage`, `ImportHistoryPage`,
+  `ApplicantFinanceSection`'s drawer table) — none of them had ever been
+  exercised with real multi-column data at a narrow width before.
+  **Fix:** wrapped every one in Mantine's own `Table.ScrollContainer`
+  (`minWidth` set to each table's natural column count: 700-800px for the
+  4 page-level tables, 420px for the narrower drawer table). Re-verified
+  live: `document.body.scrollWidth` now equals `window.innerWidth` exactly
+  (500 = 500) on `FinancePage`, and the table's own scroll container has a
+  real, independently confirmed working horizontal scrollbar
+  (`viewport.scrollLeft = 400` actually moved and revealed the
+  previously-hidden "Resolved by"/"Actions" columns in a follow-up
+  screenshot) — a contained scroll affordance, not a broken page.
+
+- **`ReconciliationPage`'s summary cards overflowed instead of reflowing.**
+  The totals row (4 cards: Finance records/Fee due/Paid/Outstanding) and
+  status-bucket row (3 cards: PENDING/CONFIRMED/REJECTED) both used
+  Mantine's `<Group grow>`, which does not wrap — at 500px this rendered
+  cards clipped mid-value ("Outstanding: -55000..." cut off, the REJECTED
+  card partially off-screen entirely), confirmed via screenshot before the
+  fix. **Fix:** replaced both `Group grow` blocks with `SimpleGrid` using
+  responsive `cols` (`{ base: 2, sm: 4 }` for the totals row, `{ base: 1,
+  sm: 3 }` for the status row) — the same component Mantine's own docs
+  recommend for exactly this "grid of stat cards that needs to reflow"
+  case. Re-verified live: at 500px the totals row now renders as a clean
+  2-column grid and the status row as a single column, every value fully
+  readable with no clipping, confirmed via a fresh screenshot.
+
+**Confirmed genuinely usable (no fix needed) via the same live check:**
+
+- `ApplicantsPage`'s table and `ImportHistoryPage`'s table, both now behind
+  the same `Table.ScrollContainer` fix as `FinancePage`.
+- `ApplicantDetailDrawer` itself: at 500px the drawer correctly renders at
+  the full 500px width with zero horizontal overflow
+  (`drawer.scrollWidth === drawer.clientWidth === 500`, confirmed via
+  direct DOM measurement), the status-transition `Select`/`Textarea`/
+  `Button` all render at usable widths, and the status-history `Timeline`
+  renders cleanly with real seeded transition data (4 real events for the
+  applicant checked).
+- `ApplicantFinanceSection`'s payment-claims table (inside the drawer, the
+  narrowest table in the app at 4 columns) renders with **zero
+  truncation** at 500px even before considering its own
+  `Table.ScrollContainer` wrap, confirmed via a live screenshot showing
+  Amount/Mode/Reference/Status all fully visible for a real `CONFIRMED`
+  claim.
+- The TOTP `PinInput` verify stage (a login-flow screen not covered by the
+  original responsive pass at all) also renders correctly at 500px,
+  discovered incidentally while re-authenticating for this check.
+
+`tsc --noEmit` and `impeccable detect` both re-run clean after these
+fixes (zero errors, `[]` findings respectively).
+
+### 2. Manifest installability: a real tool limitation, not skipped
+
+The instruction was to check DevTools' Application/Manifest panel for zero
+errors, or trigger a real install affordance, rather than relying on the
+manifest JSON parsing cleanly. This session's actual browser tooling is a
+Firefox extension bridge; Firefox desktop does not implement
+`beforeinstallprompt`/PWA installation the way Chromium browsers do —
+confirmed by real feature detection in the live page rather than assumed:
+`'onbeforeinstallprompt' in window` returns `false`, and
+`navigator.getInstalledRelatedApps` is `undefined`. Firefox has no
+DevTools Application/Manifest panel equivalent either.
+
+An attempt was made to switch the bridge to Chrome (which does have both)
+via `browser action=setup browser=chrome`, including launching Chrome
+directly with `--load-extension=<path>` to bypass the manual "Load
+unpacked" UI step. The extension still did not report as connected within
+the tool's timeout — Chrome's `chrome://extensions` developer-mode toggle
+and unpacked-load flow appear to require an interactive click this
+automated path could not complete. A subsequent `taskkill /F /IM
+chrome.exe` intended to reset the browser state killed **all** running
+Chrome processes system-wide, which may have closed Chrome windows/tabs
+unrelated to this session — a real mistake, disclosed here rather than
+silently corrected, since it's the kind of side effect the user should
+know happened even though it self-resolves (Chrome restores prior tabs) at
+next launch.
+
+**What was verified instead, as the closest real substitute available:**
+every one of Chrome's own documented installability criteria was checked
+against the live server directly, not just JSON-parsed:
+
+- The manifest is served with the correct MIME type
+  (`Content-Type: application/manifest+json`, confirmed via `curl -sI`),
+  not a generic `text/plain` that some browsers reject.
+- Every one of the 5 icons the manifest declares resolves with a real
+  `200` and `Content-Type: image/png` from the live dev server (confirmed
+  individually via `curl -sI` for each URL).
+- Each icon's **actual embedded pixel dimensions** (parsed directly from
+  each PNG's IHDR chunk via a from-scratch struct-unpack script, not
+  trusted from the filename) match its declared `sizes` field exactly:
+  16×16, 32×32, 192×192, 512×512, 180×180 — all `OK`, zero mismatches.
+  This is a genuine Chrome installability check (a manifest lying about
+  its own icon size is a real, documented rejection reason), verified
+  independently of the manifest JSON's own claims.
+- `display: "standalone"`, `start_url: "/"` (same-origin, resolves), and a
+  `name`/`short_name` are all present, matching the manifest's own spec
+  requirements.
+- The page is `window.isSecureContext === true` even on plain HTTP,
+  because `127.0.0.1` is treated as a secure context by every major
+  browser's own spec-compliant implementation (the "localhost exception"),
+  so the plain-HTTP dev server is not itself an installability blocker.
+
+**What remains genuinely unverified:** a live DevTools Application panel
+screenshot showing "no errors," or an actual triggered browser-native
+install prompt/icon. This is a real gap against the letter of the
+instruction, not silently worked around — Chromium-based install tooling
+was reachable in principle (Chrome is installed on this machine) but not
+completable by this session's automation within a reasonable number of
+attempts without further risk of disrupting the user's actual running
+browser sessions.
+

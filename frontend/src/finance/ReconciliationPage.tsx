@@ -20,7 +20,7 @@
  * order regardless of what the backend happens to return.
  */
 
-import { Alert, Card, Center, Group, Loader, Stack, Table, Text, Title } from "@mantine/core";
+import { Alert, Card, Center, Loader, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
 import { WarningCircle, ChartLine } from "@phosphor-icons/react";
 import { ApiError } from "../api/client";
 import type { PaymentClaimStatus, ReconciliationCycle, ReconciliationTotals } from "../api/types";
@@ -36,7 +36,7 @@ function amountFor(row: ReconciliationCycle | ReconciliationTotals, status: Paym
 function TotalsCards({ totals }: { totals: ReconciliationTotals }) {
   return (
     <Stack gap="md">
-      <Group grow>
+      <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md">
         <Card withBorder padding="lg">
           <Text size="xs" c="dimmed">
             Finance records
@@ -69,9 +69,9 @@ function TotalsCards({ totals }: { totals: ReconciliationTotals }) {
             {totals.outstanding}
           </Text>
         </Card>
-      </Group>
+      </SimpleGrid>
 
-      <Group grow>
+      <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
         {STATUS_ORDER.map((status) => {
           const bucket = amountFor(totals, status);
           return (
@@ -88,7 +88,7 @@ function TotalsCards({ totals }: { totals: ReconciliationTotals }) {
             </Card>
           );
         })}
-      </Group>
+      </SimpleGrid>
     </Stack>
   );
 }
@@ -124,7 +124,8 @@ export function ReconciliationPage() {
             By intake cycle
           </Title>
 
-          <Table striped highlightOnHover withTableBorder>
+          <Table.ScrollContainer minWidth={800}>
+            <Table striped highlightOnHover withTableBorder>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Intake cycle</Table.Th>
@@ -170,7 +171,8 @@ export function ReconciliationPage() {
                 </Table.Tr>
               )}
             </Table.Tbody>
-          </Table>
+            </Table>
+          </Table.ScrollContainer>
         </>
       )}
     </Stack>

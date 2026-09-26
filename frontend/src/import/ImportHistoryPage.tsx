@@ -61,7 +61,8 @@ export function ImportHistoryPage() {
 
       {query.data && (
         <>
-          <Table striped highlightOnHover withTableBorder>
+          <Table.ScrollContainer minWidth={700}>
+            <Table striped highlightOnHover withTableBorder>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Filename</Table.Th>
@@ -108,7 +109,8 @@ export function ImportHistoryPage() {
                 </Table.Tr>
               )}
             </Table.Tbody>
-          </Table>
+            </Table>
+          </Table.ScrollContainer>
 
           <Group justify="space-between">
             <Text size="sm" c="dimmed">

@@ -109,7 +109,8 @@ export function FinancePage() {
 
       {query.data && (
         <>
-          <Table striped highlightOnHover withTableBorder>
+          <Table.ScrollContainer minWidth={720}>
+            <Table striped highlightOnHover withTableBorder>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Submitted</Table.Th>
@@ -207,7 +208,8 @@ export function FinancePage() {
                 </Table.Tr>
               )}
             </Table.Tbody>
-          </Table>
+            </Table>
+          </Table.ScrollContainer>
 
           <Group justify="space-between">
             <Text size="sm" c="dimmed">
