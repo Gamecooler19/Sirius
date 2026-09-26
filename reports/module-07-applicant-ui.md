@@ -209,3 +209,93 @@ backend source per this module's own instruction; the backend
 (`app.services.status_transitions.is_transition_allowed`,
 `app.core.deps.require_role_session`, and RLS) remains the actual
 enforcement point for every behavior this module's UI merely reflects.
+
+## Follow-up verification
+
+Three gaps in this module's own original verification, closed against the
+same live stack and, for two of the three, data already sitting in it —
+no new fixtures created for any of them. All three confirmed the existing
+design; none surfaced a real defect, so no code change was needed.
+
+### 1. A real three-filter case where the third filter actually excludes a row
+
+The original report verified two-filter combinations
+(`current_status=ADMISSION_TAKEN` + `program=CS`, then + `intake_cycle=Fall2026`
+on top) but that third addition happened to exclude nothing new — both
+matched rows were already `Fall2026`, so the check never actually proved a
+third filter narrows anything beyond what the first two already had.
+
+Walked the full 36-row seeded dataset first (`psql`) to find a genuine
+combination where adding a third filter excludes at least one row the
+first two alone would include, rather than constructing one via a status
+transition: `current_status=IMPORTED` + `intake_cycle=Fall2026` matches
+**20** rows spanning both `CS` (9) and `ECE` (11); adding `program=CS` on
+top narrows this to exactly **9**, excluding all 11 `ECE` rows the
+two-filter query alone would have returned. This combination already
+existed in the live seed data — no new fixture, no status transition
+needed.
+
+Reproduced through the real UI (not curl): as `m4-manager@...`, applied
+`intake_cycle=Fall2026` then `current_status=IMPORTED` — the real network
+request was `GET /applicants?limit=10&offset=0&current_status=IMPORTED&intake_cycle=Fall2026`,
+result `"Showing 1-10 of 20"`. Adding `program=CS` produced
+`GET /applicants?limit=10&offset=0&current_status=IMPORTED&program=CS&intake_cycle=Fall2026`,
+result **"Showing 1-9 of 9"** — every one of the 9 visible rows confirmed
+`CS`/`Fall2026`/`IMPORTED` by direct inspection, with zero `ECE` rows
+present. `9 < 20`, and `9` is the exact intersection size computed
+independently from the seed data beforehand, not merely "smaller than
+before" — confirming the frontend passes all three active params together
+in one request and the backend's own `AND`-composed filter list narrows
+correctly across three simultaneous constraints, not just two. No code
+change needed.
+
+### 2. Filtering from a page other than 1 resets to offset 0, not a stale out-of-range offset
+
+The original report tested pagination and filters independently but never
+in the same session in that order — leaving open whether choosing a filter
+while sitting on, say, page 3 of the unfiltered list would carry the
+existing page/offset state forward into the filtered request (producing a
+`GET /applicants?offset=20&...` against a filtered set that might only
+have 3 total rows, i.e. a request entirely past the end of the result set)
+or correctly reset to page 1/offset 0.
+
+As `m4-manager@...` (36 total, unfiltered), navigated to page 3 (confirmed
+via the visible "Showing 21-30 of 36" and the pagination control
+highlighting "3"). Instrumented `window.fetch` to capture the exact
+outgoing request URL, then applied `intake_cycle=Spring2027` (a filter
+whose real total is 3, far short of an offset-20 request). The actual
+network call fired was **`GET /applicants?limit=10&offset=0&intake_cycle=Spring2027`**
+— `offset=0`, not the stale `offset=20` from page 3 — and the visible
+result was "Showing 1-3 of 3" with the pagination control showing page
+"1", not "3" or a blank/broken page. This confirms `ApplicantsPage`'s own
+`resetToFirstPage()` call (invoked from every filter's `onChange` handler)
+does what it's named for, and that the `page` state feeding
+`useApplicantsList`'s `offset` calculation is the same state the
+`Pagination` control renders from — no separate, driftable copy of
+"current page" existed in the code that could get the reset while the
+other didn't. No code change needed.
+
+### 3. Terminal-status applicant shows the correct message, not an empty or broken control
+
+The original report exercised the terminal-status branch only indirectly
+(by deriving from `allowedNextStatuses` returning an empty array in code
+review), never by actually opening the drawer for a real applicant
+already sitting at a terminal status.
+
+Opened the detail drawer for `M3 Finance Test Applicant`
+(`ADMISSION_TAKEN`) — Module 03's own leftover applicant, the same one
+Module 04's report used to demonstrate the finance-record RLS narrowing
+and whose `application_status_event` history is genuinely empty (its
+status was set via a direct `psql UPDATE` during Module 03's own setup,
+never through the real transition endpoint, exactly as Module 04's report
+already documented). The drawer rendered exactly:
+`"ADMISSION_TAKEN is a terminal status -- no further transitions are
+possible."` — no `Select` control, no disabled empty dropdown, no crash,
+and the "Status history" section correctly showed "No status changes
+recorded yet." beneath it (the genuine empty-history case, not a loading
+spinner stuck open or an error). Confirmed as the logged-in
+`ADMISSIONS_MANAGER` — a role that *is* in `APPLICANTS_ROLES` — so this
+was specifically the terminal-status branch firing, not the separate
+role-gate branch from the original report's own AUDITOR check. No code
+change needed.
+
