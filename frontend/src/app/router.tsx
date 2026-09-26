@@ -3,7 +3,7 @@ import { RequireAuth } from "../auth/RequireAuth";
 import { AppShellLayout } from "./AppShellLayout";
 import { LoginPage } from "../pages/LoginPage";
 import { HomePage } from "../pages/HomePage";
-import { ApplicantsPage } from "../pages/ApplicantsPage";
+import { ApplicantsPage } from "../applicants/ApplicantsPage";
 import { FinancePage } from "../pages/FinancePage";
 
 const router = createBrowserRouter([

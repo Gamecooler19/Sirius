@@ -1,0 +1,92 @@
+/** TanStack Query hooks wrapping the real `/applicants*` read endpoints
+ * (`api/app/routers/applicants_read.py`) and the status-transition write
+ * endpoint (`api/app/routers/status.py`). No mocked data anywhere here --
+ * every hook calls the live backend through `api/client.ts`.
+ */
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "../api/client";
+import type {
+  ApplicantDetail,
+  ApplicantListResponse,
+  ApplicationStatus,
+  StatusHistoryResponse,
+  StatusTransitionRequest,
+  StatusTransitionResponse,
+} from "../api/types";
+
+/** Matches `GET /applicants`'s own query params exactly
+ * (`app.routers.applicants_read.list_applicants`) -- `limit`/`offset` for
+ * pagination, `current_status`/`program`/`intake_cycle` as the only three
+ * filters the backend actually supports. No filter is invented here that
+ * the backend doesn't accept.
+ */
+export interface ApplicantListParams {
+  limit: number;
+  offset: number;
+  current_status?: ApplicationStatus | null;
+  program?: string | null;
+  intake_cycle?: string | null;
+}
+
+function buildQueryString(params: ApplicantListParams): string {
+  const search = new URLSearchParams();
+  search.set("limit", String(params.limit));
+  search.set("offset", String(params.offset));
+  if (params.current_status) search.set("current_status", params.current_status);
+  if (params.program) search.set("program", params.program);
+  if (params.intake_cycle) search.set("intake_cycle", params.intake_cycle);
+  return search.toString();
+}
+
+export const applicantsKeys = {
+  all: ["applicants"] as const,
+  list: (params: ApplicantListParams) => ["applicants", "list", params] as const,
+  detail: (id: string) => ["applicants", "detail", id] as const,
+  statusHistory: (id: string) => ["applicants", "statusHistory", id] as const,
+};
+
+export function useApplicantsList(params: ApplicantListParams) {
+  return useQuery({
+    queryKey: applicantsKeys.list(params),
+    queryFn: () => api.get<ApplicantListResponse>(`/applicants?${buildQueryString(params)}`),
+    placeholderData: (previousData) => previousData,
+  });
+}
+
+export function useApplicantDetail(id: string | null) {
+  return useQuery({
+    queryKey: applicantsKeys.detail(id ?? ""),
+    queryFn: () => api.get<ApplicantDetail>(`/applicants/${id}`),
+    enabled: id !== null,
+  });
+}
+
+export function useApplicantStatusHistory(id: string | null) {
+  return useQuery({
+    queryKey: applicantsKeys.statusHistory(id ?? ""),
+    queryFn: () => api.get<StatusHistoryResponse>(`/applicants/${id}/status-history`),
+    enabled: id !== null,
+  });
+}
+
+/** `POST /applicants/{id}/status` -- the real transition endpoint. The
+ * frontend's own `ALLOWED_TRANSITIONS` table (`statusTransitions.ts`)
+ * only decides which options the UI *offers*; this call always goes to
+ * the real backend, whose 422 on a genuinely invalid transition is the
+ * actual enforcement (surfaced via `ApiError`, not swallowed here).
+ *
+ * On success, invalidates the list, this applicant's detail, and its
+ * status-history -- the three query caches whose data the transition just
+ * changed -- so the UI reflects the new state without a manual reload.
+ */
+export function useTransitionApplicantStatus(applicantId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: StatusTransitionRequest) =>
+      api.post<StatusTransitionResponse>(`/applicants/${applicantId}/status`, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: applicantsKeys.all });
+    },
+  });
+}
