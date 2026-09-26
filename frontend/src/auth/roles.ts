@@ -18,6 +18,18 @@
  *   `_LIST_ROLES` (`SUPER_ADMIN`/`ADMISSIONS_MANAGER`/`AUDITOR`) -- an
  *   `AUDITOR` can see the batch history but has no legitimate reason to
  *   run an import themselves.
+ * - Payment-claim submit vs. resolve: another genuine asymmetry, and a
+ *   sharper one than import's -- `app.routers.payment_claim`'s
+ *   `submit_payment_claim` allows `SUPER_ADMIN`/`FINANCE_STAFF`/
+ *   `FINANCE_MANAGER`, but `confirm_payment_claim`/`reject_payment_claim`
+ *   allow only `SUPER_ADMIN`/`FINANCE_MANAGER` -- `FINANCE_STAFF` may
+ *   originate a claim but can never resolve *any* claim, including one
+ *   submitted by a different staff member. This is the real
+ *   maker-checker separation the backend enforces (plus an
+ *   application-layer same-user check on top, for the case where a
+ *   `FINANCE_MANAGER` tries to resolve their own submission); the
+ *   frontend's role sets below reflect that split exactly, not a milder
+ *   version of it.
  */
 
 import type { RoleCode } from "../api/types";
@@ -42,6 +54,21 @@ export const IMPORT_HISTORY_ROLES: RoleCode[] = [
   "ADMISSIONS_MANAGER",
   "AUDITOR",
 ];
+
+/** `app.routers.payment_claim.submit_payment_claim`'s own
+ * `require_role_session` allowlist.
+ */
+export const PAYMENT_SUBMIT_ROLES: RoleCode[] = [
+  "SUPER_ADMIN",
+  "FINANCE_STAFF",
+  "FINANCE_MANAGER",
+];
+
+/** `app.routers.payment_claim.confirm_payment_claim`/`reject_payment_claim`'s
+ * own `require_role_session` allowlist -- deliberately excludes
+ * `FINANCE_STAFF`, matching the backend's real maker-checker asymmetry.
+ */
+export const PAYMENT_RESOLVE_ROLES: RoleCode[] = ["SUPER_ADMIN", "FINANCE_MANAGER"];
 
 export function hasRole(role: RoleCode, allowed: RoleCode[]): boolean {
   return allowed.includes(role);

@@ -4,7 +4,7 @@ import { AppShellLayout } from "./AppShellLayout";
 import { LoginPage } from "../pages/LoginPage";
 import { HomePage } from "../pages/HomePage";
 import { ApplicantsPage } from "../applicants/ApplicantsPage";
-import { FinancePage } from "../pages/FinancePage";
+import { FinancePage } from "../finance/FinancePage";
 import { ImportUploadPage } from "../import/ImportUploadPage";
 import { ImportHistoryPage } from "../import/ImportHistoryPage";
 

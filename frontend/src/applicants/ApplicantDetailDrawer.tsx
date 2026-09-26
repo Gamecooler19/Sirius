@@ -30,6 +30,7 @@ import { ApiError } from "../api/client";
 import type { ApplicationStatus } from "../api/types";
 import { useMe } from "../api/useMe";
 import { APPLICANTS_ROLES, hasRole } from "../auth/roles";
+import { ApplicantFinanceSection } from "../finance/ApplicantFinanceSection";
 import { ALL_STATUSES, allowedNextStatuses } from "./statusTransitions";
 import {
   useApplicantDetail,
@@ -232,6 +233,9 @@ function DrawerContent({ applicantId }: { applicantId: string }) {
               ))}
             </Timeline>
           )}
+
+          <Divider label="Finance" />
+          <ApplicantFinanceSection applicantId={applicantId} />
         </>
       )}
     </Stack>

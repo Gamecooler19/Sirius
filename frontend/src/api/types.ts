@@ -166,3 +166,83 @@ export interface ImportBatchListResponse {
   limit: number;
   offset: number;
 }
+
+/** Mirrors `api/app/models/enums.PaymentClaimStatus` and `PaymentMode`
+ * exactly.
+ */
+export type PaymentClaimStatus = "PENDING" | "CONFIRMED" | "REJECTED";
+
+export type PaymentMode = "CASH" | "CHEQUE" | "BANK_TRANSFER" | "UPI" | "CARD" | "OTHER";
+
+/** Mirrors `api/app/schemas/payment_claim.py::PaymentClaimSubmitRequest`
+ * exactly -- deliberately has no `submitted_by` field, since the backend
+ * takes that from the authenticated session identity, never from the
+ * request body (that schema's own docstring: "trusting a client-supplied
+ * identity for an audit-relevant field... defeats the entire point of
+ * recording it"). This frontend type mirrors that omission rather than
+ * inventing a field the backend would ignore.
+ */
+export interface PaymentClaimSubmitRequest {
+  finance_record_id: string;
+  amount: string;
+  payment_mode: PaymentMode;
+  reference_number?: string | null;
+}
+
+/** Mirrors `PaymentClaimResolveRequest` exactly -- the only input either
+ * `/confirm` or `/reject` takes.
+ */
+export interface PaymentClaimResolveRequest {
+  note?: string | null;
+}
+
+/** Mirrors `PaymentClaimResponse` (submit/confirm/reject) exactly. */
+export interface PaymentClaimResponse {
+  id: string;
+  finance_record_id: string;
+  amount: string;
+  status: PaymentClaimStatus;
+  payment_mode: PaymentMode;
+  reference_number: string | null;
+  submitted_by: string;
+  confirmed_by: string | null;
+  confirmed_at: string | null;
+  note: string | null;
+}
+
+/** Mirrors `api/app/schemas/reads.py::PaymentClaimDetail` exactly --
+ * the shape `GET /finance/payment-claims` and `GET /applicants/{id}/finance`
+ * both return for each claim. Same fields as `PaymentClaimResponse` plus
+ * `created_at`.
+ */
+export interface PaymentClaimDetail {
+  id: string;
+  finance_record_id: string;
+  amount: string;
+  status: PaymentClaimStatus;
+  payment_mode: PaymentMode;
+  reference_number: string | null;
+  submitted_by: string;
+  confirmed_by: string | null;
+  confirmed_at: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+export interface PaymentClaimListResponse {
+  items: PaymentClaimDetail[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** Mirrors `api/app/schemas/reads.py::ApplicantFinanceResponse` exactly
+ * -- the real `GET /applicants/{id}/finance` response.
+ */
+export interface ApplicantFinanceResponse {
+  finance_record_id: string;
+  applicant_id: string;
+  total_fee_due: string;
+  total_paid: string;
+  payment_claims: PaymentClaimDetail[];
+}
