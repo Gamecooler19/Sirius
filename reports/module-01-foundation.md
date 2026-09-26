@@ -2,7 +2,7 @@
 
 ## Scope
 
-Scaffold the foundation for UnivAdmissions: Docker Compose stack (FastAPI,
+Scaffold the foundation for Sirius: Docker Compose stack (FastAPI,
 SQLAlchemy 2.x async, PostgreSQL, PgBouncer transaction pooling, Alembic,
 Valkey, RustFS), core schema and migrations, PostgreSQL row-level security
 as defense-in-depth on top of application-level RBAC, ADR-01 pooling
@@ -13,7 +13,7 @@ workflow itself were explicitly out of scope — deferred to later modules,
 with their tables already existing so those modules build directly on them.
 
 No git remote exists for this project yet; work was committed to a local
-repository only (`C:\CodeBase\univadmissions`), per explicit instruction.
+repository only (`C:\CodeBase\sirius`), per explicit instruction.
 This report was written and committed after that repository was
 established — the original module-01 session reported results in chat only
 as a stopgap, since committing a report to a repo that didn't exist yet
@@ -25,7 +25,7 @@ a committed `reports/module-NN-slug.md`.
 ### Stack (`deploy/`)
 
 `docker-compose.yml` brings up seven services: `postgres` (custom image,
-`01-create-app-role.sh` creates the non-superuser `univadmissions` role on
+`01-create-app-role.sh` creates the non-superuser `sirius` role on
 first init), `pgbouncer` (transaction pooling, `edoburu/pgbouncer`),
 `valkey`, `rustfs`, a one-shot `migrate` service, and `api`. Datastores
 publish nothing to the host; `api` and `rustfs` publish on plain loopback
@@ -63,13 +63,13 @@ there is no public deployment target yet.
 
 ### Row-level security (ADR-02, ADR-03)
 
-UnivAdmissions has no tenancy axis (unlike the GeM precedent this stack's
+Sirius has no tenancy axis (unlike the GeM precedent this stack's
 pooling discipline is modeled on), so RLS here encodes **role-based**
 visibility instead: `app.actor_role` decides which roles see a table at
 all; `applicant`/`application_status_event` additionally restrict
 `ADMISSIONS_COUNSELOR` to rows where `assigned_counselor_id = app.actor_id`.
 Every policy uses `FORCE ROW LEVEL SECURITY` and the application connects
-as the dedicated non-superuser `univadmissions` role, never as the
+as the dedicated non-superuser `sirius` role, never as the
 bootstrap `postgres` superuser.
 
 ### ADR-01 pooling discipline
@@ -104,13 +104,13 @@ route (`app/routers/admin.py`).
 All verification below was run against the real Docker Compose stack —
 `docker compose up -d --build` from a clean state, `alembic upgrade head`
 through the real `migrate` service, `psql` connected as the ordinary
-`univadmissions` role (never superuser), and real HTTP calls against the
+`sirius` role (never superuser), and real HTTP calls against the
 running `api` container on `127.0.0.1:38210` — not code review alone.
 
 ### Migrations
 
 `docker compose up migrate` ran all five migrations cleanly from empty
-volumes. `\dt+` confirmed all ten tables owned by `univadmissions`, not
+volumes. `\dt+` confirmed all ten tables owned by `sirius`, not
 `postgres` (see Defect 1 below).
 
 ### RLS isolation
@@ -191,19 +191,19 @@ cast error.
 
 **Defect 1 — migrations ran as the bootstrap superuser, silently defeating
 RLS.** `DATABASE_DIRECT_URL` initially connected as `postgres` (the
-bootstrap superuser) rather than the `univadmissions` application role.
+bootstrap superuser) rather than the `sirius` application role.
 Every table Alembic created was therefore owned by `postgres`, and because
 Postgres superusers bypass RLS regardless of `FORCE ROW LEVEL SECURITY`,
 this is the exact failure mode ADR-02 exists to prevent — the one
 previously documented on the GeM project. It was caught immediately by
 this module's own live verification: connecting as the ordinary
-`univadmissions` role and attempting `SELECT 1 FROM "role"` failed with
-`permission denied for table role`, because `univadmissions` had never
+`sirius` role and attempting `SELECT 1 FROM "role"` failed with
+`permission denied for table role`, because `sirius` had never
 been granted anything on tables it didn't own. Fixed by changing
 `DATABASE_DIRECT_URL` (both `migrate` and `api` services) to connect as
-`univadmissions` even for the direct, non-pooled connection Alembic uses —
+`sirius` even for the direct, non-pooled connection Alembic uses —
 confirmed by re-running the migrations from a clean volume and verifying
-`\dt+` showed every table owned by `univadmissions`.
+`\dt+` showed every table owned by `sirius`.
 
 **Defect 2 — `audit_log`'s RLS policy initially blocked the
 `write_audit()` trigger's own inserts.** The first draft of the RLS

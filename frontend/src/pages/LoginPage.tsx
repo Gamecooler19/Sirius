@@ -115,7 +115,7 @@ export function LoginPage() {
       <Card shadow="sm" padding="xl" radius="md" withBorder w={420}>
         <Stack gap="md">
           <Title order={2} ta="center">
-            UnivAdmissions
+            Sirius
           </Title>
 
           {error && (
@@ -129,7 +129,7 @@ export function LoginPage() {
               <Stack gap="sm">
                 <TextInput
                   label="Email"
-                  placeholder="you@univadmissions.test"
+                  placeholder="you@sirius.app"
                   required
                   {...credentialsForm.getInputProps("email")}
                 />

@@ -87,7 +87,7 @@ positioned directly below the existing "Finance" nav entry.
 ## Verification against the live stack
 
 Verified against the real running Docker Compose stack
-(`univadmissions-api-1` on `127.0.0.1:38210`) and a real Firefox browser
+(`sirius-api-1` on `127.0.0.1:38210`) and a real Firefox browser
 session driving the real Vite dev server at `http://127.0.0.1:5173`,
 using real accumulated data across Modules 03/05/09's own prior live
 verification — no new fixtures created, no new applicants/claims seeded

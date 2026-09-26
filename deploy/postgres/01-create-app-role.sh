@@ -1,8 +1,8 @@
 #!/bin/sh
 # Runs automatically on first container init (docker-entrypoint-initdb.d),
 # connected as the bootstrap superuser (POSTGRES_USER=postgres) against the
-# univadmissions database. A .sh wrapper so the app role's password comes
-# from UNIVADMISSIONS_DB_PASSWORD at container start (injected by Compose
+# sirius database. A .sh wrapper so the app role's password comes
+# from SIRIUS_DB_PASSWORD at container start (injected by Compose
 # from deploy/.env), never baked into the image.
 #
 # ADR-02: the application connects as a dedicated NOSUPERUSER NOBYPASSRLS
@@ -15,7 +15,7 @@
 set -e
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
-CREATE ROLE univadmissions LOGIN PASSWORD '$UNIVADMISSIONS_DB_PASSWORD' NOSUPERUSER NOBYPASSRLS;
-ALTER SCHEMA public OWNER TO univadmissions;
-GRANT ALL PRIVILEGES ON DATABASE $POSTGRES_DB TO univadmissions;
+CREATE ROLE sirius LOGIN PASSWORD '$SIRIUS_DB_PASSWORD' NOSUPERUSER NOBYPASSRLS;
+ALTER SCHEMA public OWNER TO sirius;
+GRANT ALL PRIVILEGES ON DATABASE $POSTGRES_DB TO sirius;
 EOSQL

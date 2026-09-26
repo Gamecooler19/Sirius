@@ -26,7 +26,7 @@ regardless of tenant/actor scope.
    the role currently running the init script, so the bootstrap role and the
    application role must be different roles from the very first migration, not
    something to "tighten later."
-2. **The application role (`univadmissions`) is created explicitly
+2. **The application role (`sirius`) is created explicitly
    `NOSUPERUSER NOBYPASSRLS`**, stated even though both are Postgres defaults for
    a freshly created role — the guarantee must not depend on that default
    silently changing in a future Postgres version or a copy-pasted role-creation
@@ -37,7 +37,7 @@ regardless of tenant/actor scope.
    non-ownership incidentally doing it.
 4. **Verification is a live, unprivileged connection, not a code read.** Module 01
    confirms RLS isolation by connecting through PgBouncer as the ordinary
-   `univadmissions` role and demonstrating that a session with no (or a mismatched)
+   `sirius` role and demonstrating that a session with no (or a mismatched)
    `app.actor_role`/`app.actor_id` GUC sees zero rows on every RLS-protected table
    — the same class of live check that would have caught GeM's defect immediately,
    instead of a `\d+` read that only proves the policy text exists.

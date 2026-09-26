@@ -34,7 +34,7 @@ already exist from Modules 01/02:
    exactly an `UPDATE finance_record SET total_paid = ...`. Confirmed live
    before writing the trigger, not assumed: a direct
    `UPDATE finance_record SET total_paid = 100 WHERE id = ...`, connected
-   as the ordinary `univadmissions` role with `app.actor_role =
+   as the ordinary `sirius` role with `app.actor_role =
    'FINANCE_STAFF'` set, affected zero rows against the pre-this-migration
    schema -- the exact same "trigger's own write gets blocked by a policy
    that was never about the trigger" bug class Module 01 (`audit_log`) and

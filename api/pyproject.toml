@@ -1,7 +1,7 @@
 [project]
-name = "univadmissions-api"
+name = "sirius-api"
 version = "0.1.0"
-description = "UnivAdmissions - Illinois Tech Mumbai admissions and finance tracker API"
+description = "Sirius - Illinois Tech Mumbai admissions and finance tracker API"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi>=0.115,<0.116",

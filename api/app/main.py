@@ -17,7 +17,7 @@ from app.routers import (
 
 settings = get_settings()
 
-app = FastAPI(title="UnivAdmissions API")
+app = FastAPI(title="Sirius API")
 
 app.add_middleware(
     CORSMiddleware,

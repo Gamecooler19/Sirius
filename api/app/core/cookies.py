@@ -20,7 +20,7 @@ from app.core.sessions import SESSION_TTL_SECONDS
 
 settings = get_settings()
 
-SESSION_COOKIE_NAME = "univadmissions_session"
+SESSION_COOKIE_NAME = "sirius_session"
 
 
 def set_session_cookie(response: Response, session_id: str) -> None:

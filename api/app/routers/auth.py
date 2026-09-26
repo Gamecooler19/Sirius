@@ -171,7 +171,7 @@ async def totp_enroll_confirm(
     user.totp_enabled = True
     await db.flush()
 
-    session_id = request.cookies.get("univadmissions_session")
+    session_id = request.cookies.get("sirius_session")
     if session_id:
         await mark_totp_verified(session_id)
 
@@ -193,7 +193,7 @@ async def totp_verify(
     if not verify_code(raw_secret, body.code):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid TOTP code")
 
-    session_id = request.cookies.get("univadmissions_session")
+    session_id = request.cookies.get("sirius_session")
     if session_id:
         await mark_totp_verified(session_id)
 
@@ -233,7 +233,7 @@ async def totp_verify_backup_code(
     matched.used_at = func.now()
     await db.flush()
 
-    session_id = request.cookies.get("univadmissions_session")
+    session_id = request.cookies.get("sirius_session")
     if session_id:
         await mark_totp_verified(session_id)
 

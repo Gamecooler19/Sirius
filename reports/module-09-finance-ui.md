@@ -122,7 +122,7 @@ any data comes back at all.
 ## Verification against the live stack
 
 Verified against the real running Docker Compose stack
-(`univadmissions-api-1` on `127.0.0.1:38210`) and a real Firefox browser
+(`sirius-api-1` on `127.0.0.1:38210`) and a real Firefox browser
 session driving the real Vite dev server at `http://127.0.0.1:5173`,
 using Module 03's own real fixtures (`m3-financestaff`,
 `m3-financemanager`, `m3-financemanager2`, all with mandatory TOTP) and
@@ -223,7 +223,7 @@ this module.
 `api/get_totp.py` and `api/login_and_verify.py` — temporary helper
 scripts used only to generate/verify TOTP codes during this module's live
 verification — were deleted from both the `api` container
-(`univadmissions-api-1`) and the host repo before committing. The Vite
+(`sirius-api-1`) and the host repo before committing. The Vite
 dev server background task used throughout this verification was
 stopped. `git status` was checked to confirm no test `.xlsx` files, log
 files, or other scratch artifacts were staged.

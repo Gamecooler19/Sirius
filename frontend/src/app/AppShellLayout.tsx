@@ -60,7 +60,7 @@ export function AppShellLayout() {
         <Group h="100%" px="md" justify="space-between">
           <Group>
             <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
-            <Text fw={700}>UnivAdmissions</Text>
+            <Text fw={700}>Sirius</Text>
           </Group>
           <Group>
             <Text size="sm" c="dimmed">

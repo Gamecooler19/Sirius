@@ -8,7 +8,7 @@ Accepted
 
 GeM's RLS design (the precedent this stack borrows ADR-01's pooling
 discipline from) scopes every policy to a single `entity_id` GUC, because
-GeM is multi-tenant across two real operating entities. UnivAdmissions has
+GeM is multi-tenant across two real operating entities. Sirius has
 no equivalent tenancy axis -- Illinois Tech Mumbai is a single institution.
 Row-level security here exists to encode role-based visibility (a counselor
 sees their own assigned applicants; finance data is invisible to admissions
@@ -58,6 +58,6 @@ This is coarser than a full per-action RBAC matrix (module scope explicitly
 defers status-transition and payment-workflow endpoints to the next
 module), but it is real, live-verified isolation for the tables this module
 creates, not a placeholder. Verification: connect as the ordinary
-`univadmissions` role (never superuser, per ADR-02) with different
+`sirius` role (never superuser, per ADR-02) with different
 `app.actor_role`/`app.actor_id` GUC combinations and confirm each role sees
 exactly its permitted rows.

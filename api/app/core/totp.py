@@ -25,7 +25,7 @@ import secrets
 
 import pyotp
 
-ISSUER_NAME = "UnivAdmissions"
+ISSUER_NAME = "Sirius"
 BACKUP_CODE_COUNT = 10
 
 

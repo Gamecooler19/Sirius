@@ -125,7 +125,7 @@ silently overwritten and called `updated_count`. RBAC: `SUPER_ADMIN` and
 All verification below is real HTTP calls (`curl`) against the running
 `api` container on `127.0.0.1:38210`, real `.xlsx` files built with
 `openpyxl`, and direct `psql` checks connected as the ordinary
-`univadmissions` role (never superuser) — not code review alone, per this
+`sirius` role (never superuser) — not code review alone, per this
 project's own bug-class discipline (see Module 01's report for the two
 defects that discipline already caught once).
 

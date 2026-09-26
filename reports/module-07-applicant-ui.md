@@ -100,7 +100,7 @@ status-history `Timeline` in chronological order (the backend's own
 ## Verification against the live stack
 
 Verified against the real running Docker Compose stack
-(`univadmissions-api-1` on `127.0.0.1:38210`, real Postgres data already
+(`sirius-api-1` on `127.0.0.1:38210`, real Postgres data already
 seeded by Modules 01-05's own prior live verification -- 36 real
 `applicant` rows) and a real Firefox browser session driving the real
 Vite dev server at `http://127.0.0.1:5173` (the same origin binding fixed

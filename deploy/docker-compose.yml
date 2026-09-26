@@ -1,4 +1,4 @@
-name: univadmissions
+name: sirius
 
 # Local development stack only. No ADR-06 (loopback-only publish / UFW
 # hardening) in this module -- that concern is specific to a public cloud
@@ -14,13 +14,13 @@ name: univadmissions
 # container ever sees deploy/.env as a filesystem path.
 
 networks:
-  univadmissions-net:
+  sirius-net:
     driver: bridge
 
 volumes:
-  univadmissions-postgres-data:
-  univadmissions-valkey-data:
-  univadmissions-rustfs-data:
+  sirius-postgres-data:
+  sirius-valkey-data:
+  sirius-rustfs-data:
 
 services:
   postgres:
@@ -30,19 +30,19 @@ services:
     restart: unless-stopped
     environment:
       # POSTGRES_USER is the bootstrap superuser, deliberately NOT
-      # "univadmissions" -- see ADR-02 and 01-create-app-role.sh.
-      POSTGRES_DB: univadmissions
+      # "sirius" -- see ADR-02 and 01-create-app-role.sh.
+      POSTGRES_DB: sirius
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      UNIVADMISSIONS_DB_PASSWORD: ${UNIVADMISSIONS_DB_PASSWORD}
+      SIRIUS_DB_PASSWORD: ${SIRIUS_DB_PASSWORD}
     volumes:
-      - univadmissions-postgres-data:/var/lib/postgresql/data
+      - sirius-postgres-data:/var/lib/postgresql/data
     expose:
       - "5432"
     networks:
-      - univadmissions-net
+      - sirius-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d univadmissions"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sirius"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -58,9 +58,9 @@ services:
     expose:
       - "6432"
     networks:
-      - univadmissions-net
+      - sirius-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U univadmissions -d univadmissions"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U sirius -d sirius"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -69,11 +69,11 @@ services:
     image: valkey/valkey:8-alpine
     restart: unless-stopped
     volumes:
-      - univadmissions-valkey-data:/data
+      - sirius-valkey-data:/data
     expose:
       - "6379"
     networks:
-      - univadmissions-net
+      - sirius-net
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
       interval: 5s
@@ -89,11 +89,11 @@ services:
       RUSTFS_VOLUMES: /data
       RUSTFS_ADDRESS: 0.0.0.0:17188
     volumes:
-      - univadmissions-rustfs-data:/data
+      - sirius-rustfs-data:/data
     ports:
       - "127.0.0.1:17188:17188"
     networks:
-      - univadmissions-net
+      - sirius-net
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://127.0.0.1:17188/health || exit 1"]
       interval: 5s
@@ -110,18 +110,18 @@ services:
       dockerfile: api/Dockerfile
     restart: "no"
     environment:
-      DATABASE_URL: postgresql+asyncpg://univadmissions:${UNIVADMISSIONS_DB_PASSWORD}@pgbouncer:6432/univadmissions
+      DATABASE_URL: postgresql+asyncpg://sirius:${SIRIUS_DB_PASSWORD}@pgbouncer:6432/sirius
       # ADR-01 point 3 + ADR-02: direct-to-Postgres (bypassing PgBouncer)
       # for Alembic's DDL/advisory-lock session continuity, but as the
-      # ordinary `univadmissions` role, never as the `postgres` bootstrap
+      # ordinary `sirius` role, never as the `postgres` bootstrap
       # superuser -- migrations must create every table AS the role that
       # will later own and be FORCE-RLS-subject to it (ADR-02), or table
       # ownership silently lands on `postgres` instead and the app role
       # ends up with zero privileges on its own schema's tables. Found and
       # fixed for real during this module's own live-stack verification:
-      # connecting as postgres here left `univadmissions` unable to even
+      # connecting as postgres here left `sirius` unable to even
       # SELECT from "role" ("permission denied for table role").
-      DATABASE_DIRECT_URL: postgresql+asyncpg://univadmissions:${UNIVADMISSIONS_DB_PASSWORD}@postgres:5432/univadmissions
+      DATABASE_DIRECT_URL: postgresql+asyncpg://sirius:${SIRIUS_DB_PASSWORD}@postgres:5432/sirius
       VALKEY_URL: redis://valkey:6379/0
       RUSTFS_ENDPOINT: http://rustfs:17188
       RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
@@ -138,7 +138,7 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - univadmissions-net
+      - sirius-net
 
   api:
     build:
@@ -146,8 +146,8 @@ services:
       dockerfile: api/Dockerfile
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+asyncpg://univadmissions:${UNIVADMISSIONS_DB_PASSWORD}@pgbouncer:6432/univadmissions
-      DATABASE_DIRECT_URL: postgresql+asyncpg://univadmissions:${UNIVADMISSIONS_DB_PASSWORD}@postgres:5432/univadmissions
+      DATABASE_URL: postgresql+asyncpg://sirius:${SIRIUS_DB_PASSWORD}@pgbouncer:6432/sirius
+      DATABASE_DIRECT_URL: postgresql+asyncpg://sirius:${SIRIUS_DB_PASSWORD}@postgres:5432/sirius
       VALKEY_URL: redis://valkey:6379/0
       RUSTFS_ENDPOINT: http://rustfs:17188
       RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
@@ -169,7 +169,7 @@ services:
       rustfs:
         condition: service_healthy
     networks:
-      - univadmissions-net
+      - sirius-net
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:38210/healthz')\" || exit 1"]
       interval: 5s

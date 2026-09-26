@@ -124,7 +124,7 @@ the upload link, exactly matching the backend's real asymmetry.
 ## Verification against the live stack
 
 Verified against the real running Docker Compose stack
-(`univadmissions-api-1` on `127.0.0.1:38210`) and a real Firefox browser
+(`sirius-api-1` on `127.0.0.1:38210`) and a real Firefox browser
 session driving the real Vite dev server at `http://127.0.0.1:5173`. Real
 `.xlsx` files were built with `openpyxl` the same way Module 02's own
 verification built them (exact `COLUMN_MAP` header text: `Full Name`,

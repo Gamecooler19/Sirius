@@ -126,7 +126,7 @@ Defect 1 below for why `host: true` was also required).
 ## Verification against the live stack
 
 Verified against the actual running Docker Compose stack
-(`univadmissions-api-1` on `127.0.0.1:38210`, already up) and a real
+(`sirius-api-1` on `127.0.0.1:38210`, already up) and a real
 Firefox browser session driving the actual Vite dev server at
 `http://127.0.0.1:5173` — not a mocked backend, not `jsdom`. Three fresh
 test users were inserted directly into the live `user` table for this
@@ -205,7 +205,7 @@ from prior modules' own live verification still present in the database.
 opened the frontend at `http://localhost:5173` (Vite's own default
 `server.host`, which resolves to `localhost` only) against the backend at
 `http://127.0.0.1:38210`. Login returned a real `200` with
-`Set-Cookie: univadmissions_session=...; SameSite=Strict`, and the
+`Set-Cookie: sirius_session=...; SameSite=Strict`, and the
 browser's own network layer confirmed the CORS preflight/response headers
 were correct (`access-control-allow-origin: http://localhost:5173`,
 `access-control-allow-credentials: true`) — but the very next

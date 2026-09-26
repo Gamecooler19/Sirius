@@ -1,8 +1,8 @@
 ;; PgBouncer auth file. Format: "username" "password-hash-or-plaintext"
 ;;
 ;; Copy to deploy/pgbouncer/userlist.txt and replace "changeme" below with
-;; the real `univadmissions` role's password -- the exact same value as
-;; deploy/.env's own UNIVADMISSIONS_DB_PASSWORD. deploy/pgbouncer/userlist.txt
+;; the real `sirius` role's password -- the exact same value as
+;; deploy/.env's own SIRIUS_DB_PASSWORD. deploy/pgbouncer/userlist.txt
 ;; is gitignored; only this .example file is committed.
 ;;
 ;; This governs pgbouncer's own outbound connection *to* Postgres, distinct
@@ -14,4 +14,4 @@
 ;;
 ;; Baked into the pgbouncer image at build time, so a password rotation
 ;; requires rebuilding the pgbouncer image, not merely restarting it.
-"univadmissions" "changeme"
+"sirius" "changeme"

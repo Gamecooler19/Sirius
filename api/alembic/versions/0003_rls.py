@@ -11,7 +11,7 @@ this to be real isolation rather than a policy that silently does nothing
 
 1. `ALTER TABLE ... FORCE ROW LEVEL SECURITY`. Without `FORCE`, a table's
    *owner* bypasses RLS entirely by default, and the application connects
-   as the owning role (`univadmissions`, the role that ran this migration
+   as the owning role (`sirius`, the role that ran this migration
    and created these tables). A policy without `FORCE` looks correct in
    `\\d+` and protects nothing -- exactly the GeM defect ADR-02 documents.
 
