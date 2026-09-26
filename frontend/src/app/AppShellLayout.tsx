@@ -11,11 +11,19 @@ import {
   UsersThree,
   CurrencyCircleDollar,
   House,
+  UploadSimple,
+  ClockCounterClockwise,
 } from "@phosphor-icons/react";
 import { NavLink as RouterNavLink, Outlet, useNavigate } from "react-router-dom";
 import { useMe } from "../api/useMe";
 import { useLogout } from "../api/useAuth";
-import { APPLICANTS_ROLES, FINANCE_ROLES, hasRole } from "../auth/roles";
+import {
+  APPLICANTS_ROLES,
+  FINANCE_ROLES,
+  IMPORT_HISTORY_ROLES,
+  IMPORT_UPLOAD_ROLES,
+  hasRole,
+} from "../auth/roles";
 
 export function AppShellLayout() {
   const [opened, { toggle }] = useDisclosure();
@@ -94,6 +102,24 @@ export function AppShellLayout() {
             to="/finance"
             label="Finance"
             leftSection={<CurrencyCircleDollar size={18} weight="light" />}
+          />
+        )}
+
+        {hasRole(me.role_code, IMPORT_UPLOAD_ROLES) && (
+          <NavLink
+            component={RouterNavLink}
+            to="/import"
+            label="Import applicants"
+            leftSection={<UploadSimple size={18} weight="light" />}
+          />
+        )}
+
+        {hasRole(me.role_code, IMPORT_HISTORY_ROLES) && (
+          <NavLink
+            component={RouterNavLink}
+            to="/import/history"
+            label="Import history"
+            leftSection={<ClockCounterClockwise size={18} weight="light" />}
           />
         )}
       </AppShell.Navbar>

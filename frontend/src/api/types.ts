@@ -114,3 +114,55 @@ export interface StatusTransitionResponse {
   changed_by: string;
   created_at: string;
 }
+
+/** Mirrors `api/app/models/enums.ImportBatchStatus` exactly. */
+export type ImportBatchStatus = "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
+
+/** Mirrors `api/app/schemas/import_batch.py::ImportBatchResponse` exactly.
+ * `flagged_rows` is left as `Record<string, unknown>[] | null` rather than
+ * a narrower shape -- the backend itself declares it as a plain
+ * `list[dict] | None` (JSONB), not a typed schema, since it's built ad
+ * hoc per-row in `app.routers.import_.import_applicants` (row_number,
+ * applicant_id, old/new email, old/new phone, reason). The upload page
+ * reads known keys off each entry defensively rather than assuming a
+ * fixed shape.
+ */
+export interface ImportBatchResponse {
+  id: string;
+  status: ImportBatchStatus;
+  row_count: number;
+  created_count: number;
+  updated_count: number;
+  flagged_count: number;
+  rejected_count: number;
+  flagged_rows: Record<string, unknown>[] | null;
+  error_detail: string | null;
+  completed_at: string | null;
+  deduplicated: boolean;
+}
+
+/** Mirrors `api/app/schemas/reads.py::ImportBatchSummary`/`ImportBatchListResponse`
+ * exactly -- the `GET /import-batches` history list.
+ */
+export interface ImportBatchSummary {
+  id: string;
+  source_filename: string;
+  status: string;
+  row_count: number | null;
+  checksum: string | null;
+  created_count: number;
+  updated_count: number;
+  flagged_count: number;
+  rejected_count: number;
+  error_detail: string | null;
+  imported_by: string;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface ImportBatchListResponse {
+  items: ImportBatchSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}

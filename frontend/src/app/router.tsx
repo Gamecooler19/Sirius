@@ -5,6 +5,8 @@ import { LoginPage } from "../pages/LoginPage";
 import { HomePage } from "../pages/HomePage";
 import { ApplicantsPage } from "../applicants/ApplicantsPage";
 import { FinancePage } from "../pages/FinancePage";
+import { ImportUploadPage } from "../import/ImportUploadPage";
+import { ImportHistoryPage } from "../import/ImportHistoryPage";
 
 const router = createBrowserRouter([
   {
@@ -22,6 +24,8 @@ const router = createBrowserRouter([
       { index: true, element: <HomePage /> },
       { path: "applicants", element: <ApplicantsPage /> },
       { path: "finance", element: <FinancePage /> },
+      { path: "import", element: <ImportUploadPage /> },
+      { path: "import/history", element: <ImportHistoryPage /> },
     ],
   },
 ]);

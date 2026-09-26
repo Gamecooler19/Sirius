@@ -11,6 +11,13 @@
  * - Finance: `app.routers.payment_claim._LIST_ROLES` and
  *   `app.routers.reconciliation._ROLES` (`SUPER_ADMIN`, `FINANCE_STAFF`,
  *   `FINANCE_MANAGER`, `AUDITOR`).
+ * - Import upload vs. import history: a genuine asymmetry, not one
+ *   uniform gate -- `app.routers.import_.import_applicants`
+ *   (`SUPER_ADMIN`/`ADMISSIONS_MANAGER` only) is narrower than
+ *   `app.routers.import_batches_read.list_import_batches`'s own
+ *   `_LIST_ROLES` (`SUPER_ADMIN`/`ADMISSIONS_MANAGER`/`AUDITOR`) -- an
+ *   `AUDITOR` can see the batch history but has no legitimate reason to
+ *   run an import themselves.
  */
 
 import type { RoleCode } from "../api/types";
@@ -25,6 +32,14 @@ export const FINANCE_ROLES: RoleCode[] = [
   "SUPER_ADMIN",
   "FINANCE_STAFF",
   "FINANCE_MANAGER",
+  "AUDITOR",
+];
+
+export const IMPORT_UPLOAD_ROLES: RoleCode[] = ["SUPER_ADMIN", "ADMISSIONS_MANAGER"];
+
+export const IMPORT_HISTORY_ROLES: RoleCode[] = [
+  "SUPER_ADMIN",
+  "ADMISSIONS_MANAGER",
   "AUDITOR",
 ];
 

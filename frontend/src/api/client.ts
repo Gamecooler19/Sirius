@@ -47,11 +47,20 @@ async function request<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
+  const isFormData = init?.body instanceof FormData;
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     credentials: "include",
     headers: {
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      // A FormData body must NOT get an explicit Content-Type here --
+      // fetch/the browser sets `multipart/form-data; boundary=...` itself
+      // once it serializes the FormData, and the boundary value is only
+      // known at that point. Setting Content-Type manually (even to the
+      // same-looking "multipart/form-data" string) omits or mismatches
+      // the boundary and silently corrupts the body on the wire -- the
+      // backend then can't parse the parts at all. JSON bodies still get
+      // their own explicit header exactly as before.
+      ...(init?.body && !isFormData ? { "Content-Type": "application/json" } : {}),
       ...init?.headers,
     },
   });
@@ -74,6 +83,13 @@ export const api = {
   get: <T>(path: string) => request<T>(path, { method: "GET" }),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "POST", body: body !== undefined ? JSON.stringify(body) : undefined }),
+  /** For multipart/form-data uploads (e.g. `POST /import/applicants`) --
+   * distinct from `post` because the body is a `FormData` instance passed
+   * through as-is, never `JSON.stringify`'d, and never given an explicit
+   * Content-Type (see `request`'s own comment above for why).
+   */
+  postFormData: <T>(path: string, formData: FormData) =>
+    request<T>(path, { method: "POST", body: formData }),
 };
 
 export { API_BASE_URL };
