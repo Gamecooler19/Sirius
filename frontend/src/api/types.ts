@@ -246,3 +246,56 @@ export interface ApplicantFinanceResponse {
   total_paid: string;
   payment_claims: PaymentClaimDetail[];
 }
+
+/** Mirrors `api/app/schemas/reads.py::PaymentClaimStatusBreakdown` exactly
+ * -- one status bucket within a reconciliation row. Always present for
+ * all three `PaymentClaimStatus` values in a given row's
+ * `claims_by_status`, even when a status has zero claims in that scope
+ * (`count: 0, amount: "0"` rather than the status being omitted) -- see
+ * that schema's own docstring.
+ */
+export interface PaymentClaimStatusBreakdown {
+  status: PaymentClaimStatus;
+  count: number;
+  amount: string;
+}
+
+/** Mirrors `api/app/schemas/reads.py::ReconciliationCycle` exactly --
+ * one `GET /finance/reconciliation` row: every `finance_record` whose
+ * parent `applicant.intake_cycle` equals this cycle, summed, plus the
+ * same `claims_by_status` breakdown for every `payment_claim` against
+ * one of those `finance_record`s.
+ */
+export interface ReconciliationCycle {
+  intake_cycle: string;
+  finance_record_count: number;
+  total_fee_due: string;
+  total_paid: string;
+  outstanding: string;
+  claims_by_status: PaymentClaimStatusBreakdown[];
+}
+
+/** Mirrors `api/app/schemas/reads.py::ReconciliationTotals` exactly --
+ * same shape as `ReconciliationCycle` minus `intake_cycle`, the sum of
+ * every cycle row combined (computed by the backend from the `cycles`
+ * array itself, not a separate SQL aggregate -- see that route's own
+ * docstring).
+ */
+export interface ReconciliationTotals {
+  finance_record_count: number;
+  total_fee_due: string;
+  total_paid: string;
+  outstanding: string;
+  claims_by_status: PaymentClaimStatusBreakdown[];
+}
+
+/** Mirrors `api/app/schemas/reads.py::ReconciliationResponse` exactly --
+ * the real `GET /finance/reconciliation` response. No pagination, no
+ * filters -- this endpoint has neither, matching the router's own
+ * signature (`app.routers.reconciliation.get_reconciliation` takes no
+ * query params).
+ */
+export interface ReconciliationResponse {
+  cycles: ReconciliationCycle[];
+  totals: ReconciliationTotals;
+}

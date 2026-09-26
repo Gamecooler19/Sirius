@@ -70,6 +70,24 @@ export const PAYMENT_SUBMIT_ROLES: RoleCode[] = [
  */
 export const PAYMENT_RESOLVE_ROLES: RoleCode[] = ["SUPER_ADMIN", "FINANCE_MANAGER"];
 
+/** `app.routers.reconciliation._ROLES`'s own `require_role_session`
+ * allowlist, copied verbatim -- identical membership to `FINANCE_ROLES`
+ * today (both mirror the same underlying `finance_record`/`payment_claim`
+ * RLS allowlist per that router's own docstring), but named as its own
+ * constant rather than reusing `FINANCE_ROLES` directly, matching this
+ * file's existing convention of one named constant per distinct backend
+ * `require_role_session` call site (see `PAYMENT_SUBMIT_ROLES` vs.
+ * `PAYMENT_RESOLVE_ROLES` above for the same reasoning) -- a future
+ * change to either allowlist independently should not have to first
+ * notice the two names are secretly the same list.
+ */
+export const RECONCILIATION_ROLES: RoleCode[] = [
+  "SUPER_ADMIN",
+  "FINANCE_STAFF",
+  "FINANCE_MANAGER",
+  "AUDITOR",
+];
+
 export function hasRole(role: RoleCode, allowed: RoleCode[]): boolean {
   return allowed.includes(role);
 }

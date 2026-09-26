@@ -13,6 +13,7 @@ import {
   House,
   UploadSimple,
   ClockCounterClockwise,
+  ChartLine,
 } from "@phosphor-icons/react";
 import { NavLink as RouterNavLink, Outlet, useNavigate } from "react-router-dom";
 import { useMe } from "../api/useMe";
@@ -22,6 +23,7 @@ import {
   FINANCE_ROLES,
   IMPORT_HISTORY_ROLES,
   IMPORT_UPLOAD_ROLES,
+  RECONCILIATION_ROLES,
   hasRole,
 } from "../auth/roles";
 
@@ -102,6 +104,15 @@ export function AppShellLayout() {
             to="/finance"
             label="Finance"
             leftSection={<CurrencyCircleDollar size={18} weight="light" />}
+          />
+        )}
+
+        {hasRole(me.role_code, RECONCILIATION_ROLES) && (
+          <NavLink
+            component={RouterNavLink}
+            to="/finance/reconciliation"
+            label="Reconciliation"
+            leftSection={<ChartLine size={18} weight="light" />}
           />
         )}
 

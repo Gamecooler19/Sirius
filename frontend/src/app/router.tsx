@@ -7,6 +7,7 @@ import { ApplicantsPage } from "../applicants/ApplicantsPage";
 import { FinancePage } from "../finance/FinancePage";
 import { ImportUploadPage } from "../import/ImportUploadPage";
 import { ImportHistoryPage } from "../import/ImportHistoryPage";
+import { ReconciliationPage } from "../finance/ReconciliationPage";
 
 const router = createBrowserRouter([
   {
@@ -24,6 +25,7 @@ const router = createBrowserRouter([
       { index: true, element: <HomePage /> },
       { path: "applicants", element: <ApplicantsPage /> },
       { path: "finance", element: <FinancePage /> },
+      { path: "finance/reconciliation", element: <ReconciliationPage /> },
       { path: "import", element: <ImportUploadPage /> },
       { path: "import/history", element: <ImportHistoryPage /> },
     ],
