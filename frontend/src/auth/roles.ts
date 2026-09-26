@@ -91,3 +91,39 @@ export const RECONCILIATION_ROLES: RoleCode[] = [
 export function hasRole(role: RoleCode, allowed: RoleCode[]): boolean {
   return allowed.includes(role);
 }
+
+/** Module 14 Home-dashboard section gates. Deliberately distinct from
+ * `APPLICANTS_ROLES` above rather than reusing it directly: `APPLICANTS_ROLES`
+ * is scoped to "the roles that actually own the transition workflow"
+ * (per that constant's own comment), but `GET /applicants/summary`'s real
+ * backend RBAC (`app.routers.applicants_read`, "intentionally none beyond
+ * any authenticated session" per that module's own docstring) is open to
+ * all six roles, RLS-narrowed per caller. `AUDITOR` genuinely has
+ * applicant read visibility through that RLS-open design -- they already
+ * have `IMPORT_HISTORY_ROLES` nav access for the same auditing reason --
+ * so the dashboard's applicant-summary section includes `AUDITOR`
+ * alongside the three workflow-owning roles, even though the applicants
+ * *nav link* itself does not. `DASHBOARD_FINANCE_ROLES` reuses
+ * `FINANCE_ROLES` verbatim (identical membership, no asymmetry to
+ * preserve here) rather than being redefined, since finance visibility
+ * for a dashboard summary is not narrower than the existing finance nav
+ * gate the way applicant visibility is.
+ *
+ * Membership overlap is intentional and exact: `SUPER_ADMIN` and
+ * `AUDITOR` are the only two roles in both sets, so they are the only two
+ * roles that see both dashboard sections; `ADMISSIONS_MANAGER`/
+ * `ADMISSIONS_COUNSELOR` see only the applicant section;
+ * `FINANCE_STAFF`/`FINANCE_MANAGER` see only the finance section. Every
+ * one of the six roles is in at least one set today, so "a role in
+ * neither section" is not a case any current role hits, but the
+ * `hasRole` checks on `HomePage` are written to support it correctly if a
+ * future role is ever added that genuinely belongs in neither.
+ */
+export const DASHBOARD_APPLICANTS_ROLES: RoleCode[] = [
+  "SUPER_ADMIN",
+  "ADMISSIONS_MANAGER",
+  "ADMISSIONS_COUNSELOR",
+  "AUDITOR",
+];
+
+export const DASHBOARD_FINANCE_ROLES: RoleCode[] = FINANCE_ROLES;

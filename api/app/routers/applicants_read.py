@@ -54,7 +54,9 @@ from app.schemas.reads import (
     ApplicantDetail,
     ApplicantFinanceResponse,
     ApplicantListResponse,
+    ApplicantStatusBreakdown,
     ApplicantSummary,
+    ApplicantSummaryTotals,
     PaymentClaimDetail,
     StatusHistoryEvent,
     StatusHistoryResponse,
@@ -114,6 +116,77 @@ async def list_applicants(
     return ApplicantListResponse(
         items=[_to_summary(a) for a in rows], total=total, limit=limit, offset=offset
     )
+
+
+# `_ALL_STATUSES` in declaration order (matches `ApplicationStatus`'s own
+# pipeline order, the same order `frontend/src/applicants/statusTransitions.ts`
+# already lists them in) -- iterated unconditionally below so every status
+# bucket is always present in the response (`count: 0` for a status with no
+# rows in this caller's own RLS-scoped view), matching the
+# `PaymentClaimStatusBreakdown`/`ReconciliationCycle` "always-present
+# bucket" convention `app.routers.reconciliation` already established.
+_ALL_STATUSES: tuple[ApplicationStatus, ...] = tuple(ApplicationStatus)
+
+
+@router.get("/summary", response_model=ApplicantSummaryTotals)
+async def get_applicant_summary(
+    user_and_db: tuple[User, AsyncSession] = Depends(require_role_session(*_ALL_ROLES)),
+) -> ApplicantSummaryTotals:
+    """Per-status applicant counts for the Home dashboard (Module 14).
+
+    **Route ordering.** Declared here, immediately after `list_applicants`
+    and before `get_applicant`'s `/{applicant_id}` route -- FastAPI matches
+    routes in declaration order, and a literal `/applicants/summary` path
+    registered *after* the `/{applicant_id}` UUID-typed route would either
+    404 (Starlette's own UUID converter rejecting the literal string
+    `"summary"`) or, worse, silently succeed with a confusing validation
+    error, instead of ever reaching this handler. Declaring it before the
+    dynamic route removes the ambiguity entirely rather than relying on a
+    web framework's specific route-matching-order guarantee.
+
+    **RBAC/RLS: reuses `applicant`'s own existing policy, adds nothing new.**
+    Same `require_role_session(*_ALL_ROLES)` no-op-role-gate as every other
+    route in this file (see the module docstring) -- the actual visibility
+    narrowing is entirely `applicant`'s own `role_visibility` RLS policy,
+    unchanged since Module 01/03: `SUPER_ADMIN`/`ADMISSIONS_MANAGER`/
+    `FINANCE_STAFF`/`FINANCE_MANAGER`/`AUDITOR` see every row,
+    `ADMISSIONS_COUNSELOR` sees only rows where `assigned_counselor_id` is
+    their own id. This endpoint does not add a single line of new RLS or
+    RBAC code -- the exact reuse the module prompt asked for. A counselor
+    calling this endpoint gets counts scoped to only their own assigned
+    applicants automatically, for the same reason `GET /applicants` already
+    does; a manager or admin sees the real total across everyone.
+
+    **SQL-level aggregation only, matching `app.routers.reconciliation`'s
+    own discipline exactly.** One query,
+    `GROUP BY current_status` with `func.count()`, no join at all (unlike
+    reconciliation's two-query join-avoidance dance, there is nothing to
+    fan out here -- this is a single-table aggregate over `applicant`
+    itself), and no Python-side summation of `applicant` rows anywhere in
+    this function. `total` is computed by summing the already-grouped
+    `by_status` counts in Python (`sum(count for _, count in rows)`), the
+    same "sum the already-aggregated array, don't re-query" pattern
+    `ReconciliationTotals` uses for the identical drift-proofing reason:
+    `total == sum(by_status)` is a structural guarantee of this function's
+    own control flow, not a second SQL round-trip that could disagree with
+    the first under a future edit.
+    """
+    _, db = user_and_db
+
+    query = (
+        select(Applicant.current_status, func.count(Applicant.id))
+        .group_by(Applicant.current_status)
+    )
+    rows = (await db.execute(query)).all()
+    counts_by_status: dict[ApplicationStatus, int] = {status: count for status, count in rows}
+
+    by_status = [
+        ApplicantStatusBreakdown(status=s, count=counts_by_status.get(s, 0))
+        for s in _ALL_STATUSES
+    ]
+    total = sum(bucket.count for bucket in by_status)
+
+    return ApplicantSummaryTotals(total=total, by_status=by_status)
 
 
 @router.get("/{applicant_id}", response_model=ApplicantDetail)

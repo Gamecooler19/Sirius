@@ -9,6 +9,7 @@ import { api } from "../api/client";
 import type {
   ApplicantDetail,
   ApplicantListResponse,
+  ApplicantSummaryTotals,
   ApplicationStatus,
   StatusHistoryResponse,
   StatusTransitionRequest,
@@ -44,6 +45,7 @@ export const applicantsKeys = {
   list: (params: ApplicantListParams) => ["applicants", "list", params] as const,
   detail: (id: string) => ["applicants", "detail", id] as const,
   statusHistory: (id: string) => ["applicants", "statusHistory", id] as const,
+  summary: ["applicants", "summary"] as const,
 };
 
 export function useApplicantsList(params: ApplicantListParams) {
@@ -51,6 +53,20 @@ export function useApplicantsList(params: ApplicantListParams) {
     queryKey: applicantsKeys.list(params),
     queryFn: () => api.get<ApplicantListResponse>(`/applicants?${buildQueryString(params)}`),
     placeholderData: (previousData) => previousData,
+  });
+}
+
+/** TanStack Query hook wrapping the real `GET /applicants/summary`
+ * (Module 14, `app.routers.applicants_read.get_applicant_summary`). Same
+ * RLS-scoped-by-the-backend contract as `useApplicantsList` -- this hook
+ * passes no role or scope parameter of its own; the counts it receives
+ * are already narrowed to the caller's own session by the backend's reuse
+ * of `applicant`'s existing RLS policy.
+ */
+export function useApplicantSummary() {
+  return useQuery({
+    queryKey: applicantsKeys.summary,
+    queryFn: () => api.get<ApplicantSummaryTotals>("/applicants/summary"),
   });
 }
 

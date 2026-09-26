@@ -87,6 +87,26 @@ export interface ApplicantDetail extends ApplicantSummary {
   import_batch_id: string | null;
 }
 
+/** Mirrors `api/app/schemas/reads.py::ApplicantStatusBreakdown`/
+ * `ApplicantSummaryTotals` exactly -- the real `GET /applicants/summary`
+ * response (Module 14). `by_status` is always present for all 8
+ * `ApplicationStatus` values, even at `count: 0`, the same always-present
+ * bucket convention `PaymentClaimStatusBreakdown` already established.
+ * Carries no role/scope field of its own -- the counts it returns are
+ * already narrowed to the caller's own RLS-scoped view, entirely by
+ * `applicant`'s own existing RLS policy, not by anything in this response
+ * shape.
+ */
+export interface ApplicantStatusBreakdown {
+  status: ApplicationStatus;
+  count: number;
+}
+
+export interface ApplicantSummaryTotals {
+  total: number;
+  by_status: ApplicantStatusBreakdown[];
+}
+
 export interface StatusHistoryEvent {
   id: string;
   applicant_id: string;

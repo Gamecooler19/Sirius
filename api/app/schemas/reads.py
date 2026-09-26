@@ -168,3 +168,30 @@ class ReconciliationTotals(BaseModel):
 class ReconciliationResponse(BaseModel):
     cycles: list[ReconciliationCycle]
     totals: ReconciliationTotals
+
+
+class ApplicantStatusBreakdown(BaseModel):
+    """One status bucket (one of the 8 `ApplicationStatus` values) within
+    `GET /applicants/summary`. Always present for every status value, even
+    when a status has zero applicants in the caller's own RLS-scoped view
+    -- `count: 0` rather than the status being absent from the list, the
+    same "always-present bucket" convention
+    `PaymentClaimStatusBreakdown`/`ReconciliationCycle` already established
+    (Module 05) so a caller can always index by status without a
+    membership check.
+    """
+
+    status: ApplicationStatus
+    count: int
+
+
+class ApplicantSummaryTotals(BaseModel):
+    """`GET /applicants/summary` response: a per-status count breakdown
+    over exactly the `applicant` rows this caller's own session can see --
+    RLS does 100% of the visibility narrowing here (see that route's own
+    docstring), so this schema itself carries no role or scope field; the
+    numbers it returns already are the caller's own scope.
+    """
+
+    total: int
+    by_status: list[ApplicantStatusBreakdown]
