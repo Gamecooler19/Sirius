@@ -114,6 +114,8 @@ real concurrent load, not an assumption.
 
 ## 2. Scale
 
+### 2.1 Applicants list -- pagination, filtering, aggregation, RLS
+
 300 real applicant rows were seeded directly into Postgres (via a real
 `INSERT ... SELECT FROM generate_series`, with the RLS session GUCs
 set exactly as a real authenticated request would set them, so the
@@ -150,17 +152,78 @@ assigned to it out of the 312) still saw `total: 2` through
 `GET /applicants` -- RLS's row-level narrowing does not degrade or
 leak at volume.
 
-**Speed -- fast, not merely "eventually returns."** Every list/summary/
-reconciliation call measured well under 100ms warm (a cold first-call
-outlier around 370ms, consistent with connection-pool warm-up, not a
-per-request cost). `GET /finance/reconciliation` (the two-query
-join-avoidance design from Module 05) measured ~5ms even with the
-extra volume in play.
+**Speed -- fast, not merely "eventually returns."** Every list/summary
+call measured well under 100ms warm (a cold first-call outlier around
+370ms, consistent with connection-pool warm-up, not a per-request
+cost).
 
-**Category summary: zero defects found.** All 300 seeded rows and
-their `application_status_event` rows were deleted after the check,
-confirmed by a direct `SELECT count(*)` returning `12` (the exact
-pre-audit baseline) afterward.
+All 300 seeded rows and their `application_status_event` rows were
+deleted after this check, confirmed by a direct `SELECT count(*)`
+returning `12` (the exact pre-audit baseline) afterward.
+
+### 2.2 Reconciliation/dashboard aggregation -- real volume, not the applicant-only case
+
+**Self-correction, stated explicitly rather than silently fixed.** The
+first pass of this audit tested pagination/filtering/aggregation only
+against the `applicant` table (section 2.1 above) and never actually
+seeded `finance_record`/`payment_claim` volume -- `GET /finance/
+reconciliation`'s own two-query join-avoidance design (Module 05) had
+only ever run against the original 2 `finance_record`/3
+`payment_claim` rows throughout the whole audit, the exact same
+handful-of-rows case every module's own prior verification already
+covered. The original version of this report claimed reconciliation
+was checked "with the extra volume in play" -- that claim was false,
+caught on a self-review re-read of the module prompt against the
+actual evidence gathered, not caught by the user. Closed for real
+here, not left overstated.
+
+150 real applicants were moved through a genuine two-step status
+transition (`ADMISSION_OFFERED` -> `ADMISSION_TAKEN`, `OLD != NEW`,
+exactly matching what a real `POST /applicants/{id}/status` call
+does) so the real `applicant_create_finance_record()` trigger fired
+150 times, producing 150 real `finance_record` rows. Each was given a
+real, varying `total_fee_due` (`200000`-`400000`, cycling). 300 real
+`payment_claim` rows were created against them (100 `PENDING`, 100
+`REJECTED`, and 100 moved through a genuine `PENDING -> CONFIRMED`
+transition -- tracked by id in a temp table first, specifically so the
+real `payment_claim_confirmed_increments_total_paid()` rollup trigger
+fired for exactly the intended 100 rows and not the pre-existing
+genuinely-`PENDING` ones), varying amounts and payment modes, spread
+across all three real intake cycles. This brought the real
+`finance_record`/`payment_claim` tables to **152 records / 303
+claims** for the duration of this check -- a real multi-claim-per-
+record case, not the original 1-2-claims-per-record toy shape.
+
+**Result: exact at every aggregation level, no defect.** A direct
+`GROUP BY intake_cycle` ground-truth query against `finance_record`
+gave `Fall2026: 52 records, 15100000.00 fee due, 2340000.00 paid`
+(and the matching real totals for `Fall2027`/`Spring2027`).
+`GET /finance/reconciliation` returned the identical figures exactly,
+per cycle and in the combined `totals` block
+(`total_fee_due: 45000000.00`, `total_paid: 6300000.00`,
+`finance_record_count: 152`) -- and the per-status claim breakdown
+correctly reflected the real confirm-trigger's own effect
+(`CONFIRMED: 102 claims, 6300000.00` -- exactly the 100 newly-
+confirmed plus the 2 pre-existing ones, matching `total_paid` to the
+cent). Confirmed identically in the real, live browser UI via
+screenshot: every figure in both the top-level totals cards and the
+per-cycle table matches. `GET /finance/reconciliation` measured
+~35ms warm at this real volume -- the two-query, no-fan-out design
+(Query A: `finance_record` totals with no join to `payment_claim`;
+Query B: `payment_claim` counts/amounts joined only as far as
+`finance_record`) holds its own documented correctness and speed
+guarantee at real multi-claim volume, not only in the toy 1-2-claim
+case every prior module's own verification happened to use.
+
+All 150 seeded applicants, their `finance_record`/`payment_claim`
+rows, and any `application_status_event` rows were deleted after this
+check; confirmed via direct queries returning `applicants: 12`,
+`finance_records: 2`, `claims: 3`, `total_paid_sum: 550000.00` --
+the exact pre-audit baseline across every one of these tables.
+
+**Category summary: zero defects found**, now genuinely covering both
+the applicant-list case and the reconciliation/dashboard-aggregation
+case the module prompt explicitly named, not only the former.
 
 ## 3. Input boundaries
 
@@ -465,6 +528,13 @@ own timezone.
   `application_status_event` rows deleted; confirmed via
   `SELECT count(*) FROM applicant` returning `12`, the exact
   pre-audit baseline.
+- All 150 seeded `ReconScaleTest Applicant N` rows and their real
+  `finance_record`/`payment_claim`/`application_status_event` rows
+  (created for the reconciliation-at-volume follow-up, section 2.2)
+  deleted; confirmed via direct queries returning
+  `applicants: 12`, `finance_records: 2`, `claims: 3`,
+  `total_paid_sum: 550000.00` -- the exact pre-audit baseline across
+  every one of these tables, not merely the `applicant` table alone.
 - All 5 input-boundary test applicants (`longname@example.com`,
   `longname2@example.com`, `legitname@example.com`,
   `unicodetest@example.com`, `injectiontest@example.com`) and their
@@ -533,7 +603,8 @@ own timezone.
 | Concurrency: role change vs. self-TOTP-reset | No defect | Both writes landed correctly; column-level ORM updates confirmed via direct DB read |
 | Concurrency: dual-device TOTP enrollment | No defect (minor UX gap disclosed, not fixed) | Overwrite semantics hold; Device A's confirm correctly 400s, Device B's correctly 204s |
 | Concurrency: deactivation vs. reset-token redemption | No defect | Deactivated account cannot log in even with a freshly, correctly reset password |
-| Scale: pagination/filtering/aggregation at 312+ rows | No defect | Every tested offset/filter/aggregate exactly matched real ground truth; RLS scoping intact at volume |
+| Scale: applicants list at 312+ rows | No defect | Every tested offset/filter/aggregate exactly matched real ground truth; RLS scoping intact at volume |
+| Scale: reconciliation aggregation at 152 finance_record/303 claim volume | No defect (gap self-corrected mid-audit -- original pass never actually seeded this volume, caught on re-read, closed for real) | Per-cycle and combined totals exactly matched real `GROUP BY` ground truth; live UI screenshot confirms |
 | Input: extremely long strings | **Fixed** | `max_length=255` (schema) + CSS truncation (frontend); re-verified live via real `422` and real screenshot |
 | Input: zero/negative payment amount | **Fixed (severe)** | `gt=0` (schema) + `CHECK` (DB); real confirmed data corruption (`250000.00` -> `200000.00`) reproduced, then closed and re-verified at both layers |
 | Input: unicode/emoji | No defect | Real mixed-script string stored, read back, and rendered correctly |
