@@ -72,3 +72,20 @@ def verify_backup_code(code: str, hashed: str) -> bool:
         return True
     except VerifyMismatchError:
         return False
+
+
+def hash_reset_token(token: str) -> str:
+    """Module 16: password-reset tokens are hashed with the exact same
+    Argon2id hasher as everything else in this module (password,
+    backup codes) -- a distinct function name for readability at the
+    call site, not a distinct algorithm or set of parameters.
+    """
+    return _hasher.hash(token)
+
+
+def verify_reset_token(token: str, hashed: str) -> bool:
+    try:
+        _hasher.verify(hashed, token)
+        return True
+    except (VerifyMismatchError, InvalidHashError):
+        return False

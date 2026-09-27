@@ -330,6 +330,30 @@ export interface ChangePasswordRequest {
   new_password: string;
 }
 
+/** Mirrors `api/app/schemas/auth.py::ForgotPasswordRequest`/
+ * `ForgotPasswordResponse` exactly (Module 16). `POST /auth/forgot-password`
+ * always returns the identical `message` regardless of whether the email
+ * exists -- see that schema's own docstring. This type carries no field
+ * that could ever vary by outcome, matching the backend's own shape.
+ */
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+export interface ForgotPasswordResponse {
+  message: string;
+}
+
+/** Mirrors `api/app/schemas/auth.py::ResetPasswordRequest` exactly
+ * (Module 16). `token` is the raw, single-use value from the reset
+ * email's link (a `?token=` query parameter this page reads off its own
+ * URL) -- never a user id or email.
+ */
+export interface ResetPasswordRequest {
+  token: string;
+  new_password: string;
+}
+
 /** Mirrors `api/app/schemas/users.py::UserSummary` exactly (Module 15)
  * -- one row of `GET /users`, and the shape `POST /users`/
  * `PATCH /users/{id}`/`POST /users/{id}/reset-totp` all return.

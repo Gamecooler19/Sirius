@@ -62,3 +62,38 @@ class ChangePasswordRequest(BaseModel):
 
     current_password: str
     new_password: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    """`POST /auth/forgot-password` (Module 16). Unauthenticated by
+    definition -- a locked-out user has no session. Takes only an email;
+    the response is always the same generic success shape regardless of
+    whether that email exists (see the route's own docstring), so this
+    schema deliberately has no field that could ever appear in the
+    response.
+    """
+
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    """The one, unconditional response shape `POST /auth/forgot-password`
+    ever returns -- see that route's own docstring for the anti-
+    enumeration reasoning. `message` is a fixed string, not templated
+    with anything request-specific (no echoed email, no user id, no
+    token, no indication of whether a real account was found).
+    """
+
+    message: str
+
+
+class ResetPasswordRequest(BaseModel):
+    """`POST /auth/reset-password` (Module 16). `token` is the raw,
+    single-use value from the email link -- never a user id or email;
+    the token alone both identifies the account and proves the requester
+    controls the mailbox that received it, the same two-factor-of-
+    identity property a TOTP backup code has for its own account.
+    """
+
+    token: str
+    new_password: str

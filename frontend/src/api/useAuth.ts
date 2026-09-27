@@ -5,8 +5,11 @@ import { api } from "./client";
 import { useInvalidateMe } from "./useMe";
 import type {
   ChangePasswordRequest,
+  ForgotPasswordRequest,
+  ForgotPasswordResponse,
   LoginRequest,
   LoginResponse,
+  ResetPasswordRequest,
   TotpBackupCodeRequest,
   TotpEnrollConfirmRequest,
   TotpEnrollStartResponse,
@@ -67,5 +70,26 @@ export function useTotpVerifyBackupCode() {
 export function useChangePassword() {
   return useMutation({
     mutationFn: (body: ChangePasswordRequest) => api.post<void>("/auth/change-password", body),
+  });
+}
+
+/** `POST /auth/forgot-password` (Module 16). Unauthenticated -- no
+ * `useInvalidateMe` needed, since there is no session to invalidate at
+ * this point in the flow.
+ */
+export function useForgotPassword() {
+  return useMutation({
+    mutationFn: (body: ForgotPasswordRequest) =>
+      api.post<ForgotPasswordResponse>("/auth/forgot-password", body),
+  });
+}
+
+/** `POST /auth/reset-password` (Module 16). Unauthenticated -- the raw
+ * token from the email link is the entire request; no session exists
+ * yet for this to invalidate.
+ */
+export function useResetPassword() {
+  return useMutation({
+    mutationFn: (body: ResetPasswordRequest) => api.post<void>("/auth/reset-password", body),
   });
 }

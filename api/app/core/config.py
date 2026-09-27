@@ -58,6 +58,17 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     LOG_LEVEL: str = "INFO"
 
+    # Module 16: real SMTP server (Mailpit, local dev only -- see
+    # deploy/docker-compose.yml's own `mailpit` service). No external
+    # provider, no API key: `smtplib` connects to this host:port directly.
+    SMTP_HOST: str = "mailpit"
+    SMTP_PORT: int = 1025
+    SMTP_FROM_ADDRESS: str = "no-reply@sirius.app"
+
+    # Origin the password-reset link in that email points at -- the
+    # frontend dev server's own published address, not this API's own.
+    FRONTEND_BASE_URL: str = "http://127.0.0.1:5173"
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]

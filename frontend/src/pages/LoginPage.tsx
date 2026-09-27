@@ -24,7 +24,7 @@
  */
 
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Alert,
   Anchor,
@@ -159,6 +159,14 @@ export function LoginPage() {
                   required
                   {...credentialsForm.getInputProps("password")}
                 />
+                <Anchor
+                  size="sm"
+                  component={Link}
+                  to="/forgot-password"
+                  ta="right"
+                >
+                  Forgot password?
+                </Anchor>
                 <Button
                   type="submit"
                   loading={login.isPending || enrollStart.isPending}

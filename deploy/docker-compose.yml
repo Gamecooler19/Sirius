@@ -100,6 +100,31 @@ services:
       timeout: 5s
       retries: 10
 
+  # Module 16: real SMTP server for local development, not a third-party
+  # email API. Mailpit accepts any mail sent to it over SMTP (no real
+  # delivery ever leaves this stack) and exposes both a web UI and a REST
+  # API to read what was "sent" -- the exact tool a live-verification
+  # standard that requires reading a real email (not asserting the
+  # backend queued something) needs. Same dual-surface pattern rustfs
+  # already follows: reachable by service name (`mailpit:1025`) over the
+  # internal bridge network for the api container's own SMTP traffic,
+  # and its web UI published on loopback only (`127.0.0.1:8025`) for a
+  # human/browser to actually read captured mail, matching every other
+  # dev-facing service in this stack. The image ships its own
+  # `/mailpit readyz` healthcheck subcommand baked into its Dockerfile
+  # (alpine-based, confirmed from the upstream Dockerfile -- no curl/wget
+  # needed), so no custom healthcheck override is needed here, unlike
+  # postgres/pgbouncer/valkey/rustfs which do define their own.
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    expose:
+      - "1025"
+    ports:
+      - "127.0.0.1:8025:8025"
+    networks:
+      - sirius-net
+
   # One-shot migration runner: applies `alembic upgrade head` and exits.
   # `api` depends on this completing successfully rather than running
   # migrations in its own entrypoint, avoiding a race between the app
@@ -159,6 +184,18 @@ services:
       TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY}
       ENVIRONMENT: ${ENVIRONMENT}
       LOG_LEVEL: ${LOG_LEVEL}
+      # Module 16: real SMTP send through the mailpit service above, over
+      # the internal bridge network by service name -- no external
+      # provider, no API key. SMTP_FROM_ADDRESS is a plain envelope
+      # From: header Mailpit accepts unauthenticated (dev-only, no real
+      # delivery). FRONTEND_BASE_URL is the origin the password-reset
+      # link in that email points at -- the Vite dev server's own
+      # published origin (matches CORS_ORIGINS), not the api container's
+      # own address, since the link is meant to be opened in a browser.
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_FROM_ADDRESS: no-reply@sirius.app
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://127.0.0.1:5173}
     ports:
       - "127.0.0.1:38210:38210"
     depends_on:
@@ -167,6 +204,8 @@ services:
       valkey:
         condition: service_healthy
       rustfs:
+        condition: service_healthy
+      mailpit:
         condition: service_healthy
     networks:
       - sirius-net
