@@ -39,10 +39,12 @@ from app.core.crypto import decrypt_totp_secret, encrypt_totp_secret
 from app.core.db import get_db
 from app.core.deps import get_client_ip, get_current_session, get_current_user
 from app.core.mail import send_mail
+from app.core.rate_limit import check_forgot_password_rate_limit
 from app.core.security import (
     hash_backup_code,
     hash_password,
     hash_reset_token,
+    hash_reset_token_dummy,
     verify_backup_code,
     verify_password,
     verify_password_dummy,
@@ -329,11 +331,27 @@ async def forgot_password(
     by "account exists" vs "account doesn't exist" would let an
     attacker enumerate real accounts by email one guess at a time,
     for free, against an endpoint that (unlike login) requires no
-    password guess at all to probe. This route goes further than
-    login's own dummy-hash trick needs to, since there is no password
-    comparison to time-match here -- the real defense is simply that
-    every code path below returns the exact same `ForgotPasswordResponse`
-    object, not a per-branch one.
+    password guess at all to probe.
+
+    **Timing parity with the real-email path (Module 16 follow-up).**
+    A fixed response body is necessary but not sufficient -- this
+    route's real-email path does one real Argon2id `hash()` call
+    (`hash_reset_token`) plus a real SMTP send, both real work an
+    attacker's clock can measure even with an identical response body.
+    Live-measured before this fix: ~76ms for a real email vs ~10ms for
+    a nonexistent one, an 8x/~66ms gap dominated by the hash call
+    (~54ms of it in isolation) -- large enough to trivially distinguish
+    the two cases by response latency alone. The unknown-email/inactive
+    branch below now calls `hash_reset_token_dummy()`, a real Argon2id
+    `hash()` against a fixed value, so both branches perform the same
+    one-hash shape of cryptographic work -- the exact same fix login's
+    own `verify_password_dummy` already applies to its own unknown-email
+    path, extended here to a `hash()` call instead of a `verify()` call
+    (this route commits a fresh token to storage, so there is no
+    existing hash to verify against on the real-email path; the
+    equivalent expensive operation is hashing the new token instead).
+    The residual SMTP-send cost is deliberately not matched with a
+    dummy send -- see this module's own report for why.
 
     **Real behavior when the email does exist:** generates a
     cryptographically random single-use token (`secrets.token_urlsafe`,
@@ -344,38 +362,55 @@ async def forgot_password(
     carrying the raw token in the URL. The raw token is never persisted
     anywhere server-side after this response returns -- only its hash,
     exactly like a TOTP backup code.
+
+    **Rate-limited per target email (Module 16 follow-up), before any
+    database lookup.** This is the one endpoint in this codebase where
+    an unauthenticated caller can trigger a real side effect against a
+    *third party* -- mail landing in some inbox -- without proving they
+    control that inbox. `check_forgot_password_rate_limit` (`app.core.
+    rate_limit`) raises a real `429` after the third request for the
+    same email within 15 minutes, checked against the raw requested
+    string before the `SELECT` below, so the throttle threshold is
+    identical whether or not the account exists -- it carries no
+    account-existence signal of its own, preserving this route's own
+    anti-enumeration guarantee.
     """
+    await check_forgot_password_rate_limit(body.email)
+
     result = await db.execute(
         select(User).where(User.email == body.email, User.is_active.is_(True))
     )
     user = result.scalar_one_or_none()
 
-    if user is not None:
-        raw_token = secrets.token_urlsafe(32)
-        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
-            minutes=PASSWORD_RESET_TOKEN_TTL_MINUTES
-        )
-        db.add(
-            PasswordResetToken(
-                user_id=user.id,
-                token_hash=hash_reset_token(raw_token),
-                expires_at=expires_at,
-            )
-        )
-        await db.flush()
+    if user is None:
+        hash_reset_token_dummy()
+        return ForgotPasswordResponse(message=_FORGOT_PASSWORD_GENERIC_MESSAGE)
 
-        reset_link = f"{settings.FRONTEND_BASE_URL}/reset-password?token={raw_token}"
-        await send_mail(
-            to_address=user.email,
-            subject="Reset your Sirius password",
-            body=(
-                "A password reset was requested for your Sirius account.\n\n"
-                f"Reset your password using this link: {reset_link}\n\n"
-                f"This link expires in {PASSWORD_RESET_TOKEN_TTL_MINUTES} minutes "
-                "and can only be used once.\n\n"
-                "If you did not request this, you can safely ignore this email."
-            ),
+    raw_token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+        minutes=PASSWORD_RESET_TOKEN_TTL_MINUTES
+    )
+    db.add(
+        PasswordResetToken(
+            user_id=user.id,
+            token_hash=hash_reset_token(raw_token),
+            expires_at=expires_at,
         )
+    )
+    await db.flush()
+
+    reset_link = f"{settings.FRONTEND_BASE_URL}/reset-password?token={raw_token}"
+    await send_mail(
+        to_address=user.email,
+        subject="Reset your Sirius password",
+        body=(
+            "A password reset was requested for your Sirius account.\n\n"
+            f"Reset your password using this link: {reset_link}\n\n"
+            f"This link expires in {PASSWORD_RESET_TOKEN_TTL_MINUTES} minutes "
+            "and can only be used once.\n\n"
+            "If you did not request this, you can safely ignore this email."
+        ),
+    )
 
     return ForgotPasswordResponse(message=_FORGOT_PASSWORD_GENERIC_MESSAGE)
 

@@ -278,3 +278,168 @@ verification was deleted from the host repository before committing.
 Mailpit's own inbox was cleared (`DELETE /api/v1/messages`) after
 verification concluded. No secrets appear in this report or anywhere
 else committed.
+
+## Follow-up verification
+
+Two real gaps closed after this module's original verification, the
+same shape every prior follow-up in this project used -- one a direct
+live check of an existing claim, one a genuine design decision made and
+documented (one side of it resulting in real code, the other resulting
+in a plainly-stated accepted limitation), not left implicit.
+
+### 1. `audit_log` genuinely captures `password_reset_token`'s INSERT and UPDATE
+
+The original report's migration docstring *claimed* the standard
+`write_audit()` trigger (ADR-07) was wired onto `password_reset_token`
+the same as every other mutable business table, but no live query had
+actually confirmed a real row landing there. Checked directly against
+the running stack, not re-read from the migration file:
+
+1. Baseline: `SELECT count(*) FROM audit_log WHERE table_name =
+   'password_reset_token'` -> `14` (real rows accumulated from this
+   module's own earlier verification runs).
+2. Issued one real `POST /auth/forgot-password` for
+   `financestaff@sirius.app`.
+3. Re-queried `audit_log` directly: count now `15` (+1, exactly one new
+   row), and the newest row itself:
+   `action: INSERT`, `record_id` matching the new `PasswordResetToken`
+   row's own `id`, `after` containing the full real row as JSON
+   (`user_id` matching `financestaff@sirius.app`'s real id,
+   `token_hash` -- an Argon2id hash string, never the raw token --
+   `expires_at`, `used_at: null`). `actor_id`/`client_ip` are `NULL` on
+   this row, correctly: `POST /auth/forgot-password` uses `get_db`, not
+   `get_scoped_session`, since it is unauthenticated by definition and
+   has no `app.actor_id`/`app.actor_role` to `SET LOCAL` -- the same
+   shape every other unauthenticated write in this codebase has.
+4. Extracted the real raw token from the real email in Mailpit's own
+   API and completed a real `POST /auth/reset-password` ->
+   real `204`.
+5. Re-queried `audit_log` again: a second new row appeared, **same
+   `record_id`** as the INSERT row (the same token's lifecycle),
+   `action: UPDATE`, `before->>'used_at'` empty/NULL,
+   `after->>'used_at'` holding the real stamped timestamp matching the
+   reset's own completion time.
+
+Confirmed the account's password genuinely changed (`POST /auth/login`
+with the new password -> real `200`) before reverting it back to the
+original via a second real forgot-password/reset-password cycle for
+account consistency.
+
+### 2. Timing parity and rate limiting for `POST /auth/forgot-password`
+
+**Correction to this task's own premise, checked directly rather than
+assumed true:** login and `/auth/totp/verify` do **not** already have
+rate limiting in this codebase. Grepped the entire `api/` tree for any
+rate-limiting library, middleware, or attempt-counter -- none exists;
+`app.main`'s only middleware is CORS. Confirmed live: ten consecutive
+`POST /auth/login` attempts against a nonexistent account all returned
+real `401`s, no `429`, no lockout, no delay growth. This module's own
+new rate limiter (below) is therefore the **first** rate-limiting code
+in this project, not an extension of an existing pattern -- stated
+plainly since the task's premise assumed otherwise.
+
+**Timing parity -- decided: yes, needed, and implemented.**
+
+Measured live before any fix, ten interleaved real requests each via
+`curl -w "%{time_total}"` (the request's own network timer, not a
+wrapper-process timer that would add its own noise):
+
+| | mean | min | max |
+|---|---|---|---|
+| Real email (existing account) | 76.2ms | 72.8ms | 86.0ms |
+| Nonexistent email | 9.7ms | 9.1ms | 10.5ms |
+
+**~66ms delta, ~7.9x ratio** -- trivially distinguishable by response
+latency alone, despite the identical response body `Forgot
+PasswordResponse`'s own docstring already guarantees. Profiled the two
+real operations the real-email path performs and the nonexistent path
+skips: one Argon2id `hash()` call (`hash_reset_token`, isolated cost
+~54ms -- Argon2id is deliberately slow, the same reason it is used for
+passwords at all) and one real SMTP send (~9ms). The hash call is the
+dominant, closeable cost; this is structurally the same gap
+`verify_password_dummy` already exists to close at login, just on a
+`hash()` call instead of a `verify()` call (this route creates a fresh
+token rather than checking one against an existing stored value, so
+there is no existing hash to verify against on the not-found path --
+the equivalent expensive work is hashing a fixed dummy value instead).
+
+**Fix**: new `hash_reset_token_dummy()` (`app.core.security`), called
+on the unknown-email/inactive-account branch of `forgot_password`
+before returning. Rebuilt `api`, re-measured live with the same
+interleaved-request methodology:
+
+| | mean | min | max |
+|---|---|---|---|
+| Real email | 93.0ms | 74.2ms | 133.0ms |
+| Nonexistent email | 76.6ms | 63.5ms | 87.5ms |
+
+**Delta dropped to ~16ms, ratio ~1.2x** -- within the range of ordinary
+request-to-request jitter on this local stack (both means moved up
+together between the two runs too, consistent with general system
+load varying, not a fix-induced regression). The residual ~16ms is not
+matched further: it is dominated by the real SMTP send, which the
+nonexistent-email path has no equivalent expensive operation to fake
+convincingly (a dummy SMTP round-trip would need its own live Mailpit
+connection to actually cost anything close to real send latency, at
+which point it stops being a "dummy" and starts being genuine wasted
+traffic against the mail server for no defensive gain proportionate to
+the added complexity) -- accepted as a residual, disclosed here rather
+than silently left unmeasured.
+
+**Rate limiting -- decided: yes, needed for this endpoint specifically
+(not extended to login/TOTP-verify), and implemented.**
+
+The reasoning is not "login has it too, so this should": login and
+`/auth/totp/verify` genuinely have none in this codebase, confirmed
+above, and this follow-up does not add any to either -- a brute-force
+attempt against those only ever costs the attacker their own guess
+budget, the same threat model this project's login flow (Argon2id,
+`verify_password_dummy`, generic error message) already accepts by
+design without a lockout. `POST /auth/forgot-password` is materially
+different: it is the one endpoint in this codebase where an
+unauthenticated caller's request causes a real side effect against a
+**third party** who never had to prove they own the address named in
+the request -- repeated calls genuinely spam an arbitrary inbox with
+real mail. That is a distinct harm (nuisance/mail-bombing a victim who
+is not the caller) a login brute-force does not create, and is the
+actual, narrow reason this one endpoint gets a limiter while the
+others deliberately do not.
+
+**Implementation**: new `app.core.rate_limit.check_forgot_password_
+rate_limit`, a Valkey-backed fixed-window counter (`INCR` + `EXPIRE` on
+first increment) keyed by the **target email address** (lowercased),
+not by caller IP -- a botnet spread across many source IPs would still
+defeat an IP-keyed limit while flooding one victim address, which
+IP-keying would not close. Threshold: 3 requests per 15-minute window
+per email. Checked before the database lookup, so the throttle fires
+at the identical count whether or not the account exists -- it carries
+no account-existence signal of its own, preserving the anti-
+enumeration guarantee rather than reopening a new side channel through
+the throttle itself.
+
+**Live verification, real HTTP responses, genuine repeated requests**:
+
+- Cleared any stale counter, sent 4 real requests to the same target
+  email in sequence: requests 1-3 -> real `200` with the real success
+  body; request 4 -> real `429`,
+  `{"detail":"too many password reset requests for this email; try
+  again later"}`.
+- Confirmed via `valkey-cli GET`/`TTL` on the real key
+  (`forgot_password_rl:<email>`) that the counter and its 900-second
+  expiry are genuinely present in Valkey, not merely inferred from
+  response codes.
+- **Parity check**: ran the identical 4-request sequence against a
+  real account (`auditor@sirius.app`) and a nonexistent one in the same
+  test -- **both** hit `429` on exactly the 4th request, confirming the
+  limiter itself leaks no existence signal.
+- Confirmed the limiter does not break the ordinary single-request
+  case: after clearing test keys, one normal `POST /auth/forgot-
+  password` for a real account -> real `200`, real email genuinely
+  landed in Mailpit, and a full real reset (fresh token extracted from
+  that email, `POST /auth/reset-password`, new password genuinely
+  logging in) completed successfully end to end with the rate limiter
+  live in the request path throughout.
+
+All rate-limit test keys were deleted from Valkey and Mailpit's inbox
+cleared after verification. Every temp script/batch file used for this
+follow-up's timing and rate-limit tests was deleted before committing.

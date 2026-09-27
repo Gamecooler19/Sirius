@@ -83,6 +83,22 @@ def hash_reset_token(token: str) -> str:
     return _hasher.hash(token)
 
 
+def hash_reset_token_dummy() -> None:
+    """Module 16 follow-up. Runs a real Argon2id `hash()` call (the same
+    shape of work `POST /auth/forgot-password` does on its real-email
+    path via `hash_reset_token`) against a fixed dummy value, result
+    discarded. Called on that route's unknown-email path so both
+    branches perform one real hash operation each -- see
+    `verify_password_dummy`'s own docstring for the identical reasoning
+    already established at login. Live-measured need for this: a
+    nonexistent-email request completed in ~10ms while a real-email
+    request (one real `hash()` call plus the SMTP send) took ~76ms --
+    an 8x, ~66ms gap, large enough to trivially distinguish the two
+    cases by response latency alone before this fix existed.
+    """
+    _hasher.hash("forgot-password-dummy-hash-target")
+
+
 def verify_reset_token(token: str, hashed: str) -> bool:
     try:
         _hasher.verify(hashed, token)
