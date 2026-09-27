@@ -7,10 +7,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type {
+  ApplicantCreateRequest,
   ApplicantDetail,
   ApplicantListResponse,
   ApplicantSummaryTotals,
   ApplicationStatus,
+  CounselorOption,
   StatusHistoryResponse,
   StatusTransitionRequest,
   StatusTransitionResponse,
@@ -104,5 +106,40 @@ export function useTransitionApplicantStatus(applicantId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: applicantsKeys.all });
     },
+  });
+}
+
+/** `POST /applicants` -- manual single-applicant creation (Module 19,
+ * `api/app/routers/applicant_create.py`). On success, invalidates the
+ * exact same `applicantsKeys.all` query key
+ * `useTransitionApplicantStatus` already invalidates above -- the same
+ * "the list/summary caches whose data this write just changed" rule,
+ * so the newly-created applicant appears in `ApplicantsPage`'s own list
+ * (and the Home dashboard's status-breakdown widget) immediately,
+ * without a manual reload, exactly like a status transition already
+ * does.
+ */
+export function useCreateApplicant() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ApplicantCreateRequest) => api.post<ApplicantDetail>("/applicants", body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: applicantsKeys.all });
+    },
+  });
+}
+
+/** `GET /applicants/counselors` -- the assign-to picker's own data
+ * source (Module 19, `SUPER_ADMIN`/`ADMISSIONS_MANAGER` only on the
+ * backend). `enabled` lets the caller skip this fetch entirely for an
+ * `ADMISSIONS_COUNSELOR` session, which has no use for it (always
+ * auto-assigned to themselves) and would otherwise get a real,
+ * expected 403 from the backend's own role gate.
+ */
+export function useAssignableCounselors(enabled: boolean) {
+  return useQuery({
+    queryKey: ["applicants", "counselors"] as const,
+    queryFn: () => api.get<CounselorOption[]>("/applicants/counselors"),
+    enabled,
   });
 }

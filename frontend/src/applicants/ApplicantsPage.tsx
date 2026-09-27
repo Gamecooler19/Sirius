@@ -11,7 +11,9 @@ import { useState } from "react";
 import {
   Alert,
   Badge,
+  Button,
   Group,
+  Modal,
   Pagination,
   Select,
   Stack,
@@ -22,13 +24,16 @@ import {
   Loader,
   Center,
 } from "@mantine/core";
+import { useForm } from "@mantine/form";
 import { WarningCircle, UsersThree } from "@phosphor-icons/react";
 import { ApiError } from "../api/client";
+import { useMe } from "../api/useMe";
 import type { ApplicationStatus } from "../api/types";
-import { useApplicantsList } from "./useApplicants";
+import { useApplicantsList, useAssignableCounselors, useCreateApplicant } from "./useApplicants";
 import { ALL_STATUSES } from "./statusTransitions";
 import { ApplicantDetailDrawer } from "./ApplicantDetailDrawer";
 import { EmptyState } from "../components/EmptyState";
+import { APPLICANTS_ROLES, hasRole } from "../auth/roles";
 
 const PAGE_SIZE = 10;
 
@@ -43,7 +48,114 @@ const STATUS_COLORS: Record<ApplicationStatus, string> = {
   WITHDRAWN: "dark",
 };
 
+/** `POST /applicants` form (Module 19) -- the manual single-applicant
+ * creation path for a counselor taking a walk-in/phone inquiry, or a
+ * manager/admin entering one on someone's behalf. Gated on the same
+ * `APPLICANTS_ROLES` set the nav link and status-transition workflow
+ * already use (`app.routers.applicant_create`'s own `_CREATE_ROLES`
+ * mirrors that exact set) -- see `auth/roles.ts`'s own docstring for
+ * why this whole page already assumes that role scope.
+ *
+ * **The "assign to" field only renders for `SUPER_ADMIN`/
+ * `ADMISSIONS_MANAGER`** (`useAssignableCounselors`, backed by
+ * `GET /applicants/counselors`) -- an `ADMISSIONS_COUNSELOR` caller is
+ * always auto-assigned to themselves by the backend regardless of what
+ * this form sends (see that router's own docstring), so showing this
+ * role a picker it has no effect on would only be confusing, not
+ * merely redundant.
+ */
+function NewApplicantForm({ onDone }: { onDone: () => void }) {
+  const meQuery = useMe();
+  const role = meQuery.data?.role_code;
+  const canAssignOthers = role === "SUPER_ADMIN" || role === "ADMISSIONS_MANAGER";
+
+  const counselorsQuery = useAssignableCounselors(canAssignOthers);
+  const createApplicant = useCreateApplicant();
+  const [error, setError] = useState<string | null>(null);
+
+  const form = useForm({
+    initialValues: {
+      full_name: "",
+      email: "",
+      phone: "",
+      program: "",
+      intake_cycle: "",
+      assigned_counselor_id: "" as string | "",
+    },
+  });
+
+  async function handleSubmit(values: typeof form.values) {
+    setError(null);
+    try {
+      await createApplicant.mutateAsync({
+        full_name: values.full_name,
+        email: values.email,
+        phone: values.phone.trim() || null,
+        program: values.program,
+        intake_cycle: values.intake_cycle,
+        assigned_counselor_id:
+          canAssignOthers && values.assigned_counselor_id
+            ? values.assigned_counselor_id
+            : undefined,
+      });
+      form.reset();
+      onDone();
+    } catch (e) {
+      // The backend's own real rejection text surfaces here verbatim --
+      // e.g. a 409 naming the conflicting applicant's id on a
+      // duplicate phone/email, or a 422 on an invalid
+      // assigned_counselor_id -- not a rewritten generic message.
+      setError(e instanceof ApiError ? e.message : "failed to create applicant");
+    }
+  }
+
+  return (
+    <form onSubmit={form.onSubmit(handleSubmit)}>
+      <Stack gap="sm">
+        {error && (
+          <Alert color="red" icon={<WarningCircle size={18} weight="light" />}>
+            {error}
+          </Alert>
+        )}
+        {!canAssignOthers && (
+          <Text size="sm" c="dimmed">
+            This applicant will be assigned to you automatically.
+          </Text>
+        )}
+        <TextInput label="Full name" required {...form.getInputProps("full_name")} />
+        <TextInput label="Email" type="email" required {...form.getInputProps("email")} />
+        <TextInput label="Phone" placeholder="Optional" {...form.getInputProps("phone")} />
+        <TextInput label="Program" required {...form.getInputProps("program")} />
+        <TextInput
+          label="Intake cycle"
+          placeholder="e.g. Fall2026"
+          required
+          {...form.getInputProps("intake_cycle")}
+        />
+        {canAssignOthers && (
+          <Select
+            label="Assign to counselor"
+            placeholder="Leave unassigned"
+            clearable
+            data={
+              counselorsQuery.data?.map((c) => ({ value: c.id, label: c.full_name })) ?? []
+            }
+            disabled={counselorsQuery.isLoading}
+            {...form.getInputProps("assigned_counselor_id")}
+          />
+        )}
+        <Button type="submit" loading={createApplicant.isPending}>
+          Create applicant
+        </Button>
+      </Stack>
+    </form>
+  );
+}
+
 export function ApplicantsPage() {
+  const meQuery = useMe();
+  const canCreate = meQuery.data ? hasRole(meQuery.data.role_code, APPLICANTS_ROLES) : false;
+  const [createOpen, setCreateOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<ApplicationStatus | null>(null);
   const [programFilter, setProgramFilter] = useState("");
@@ -68,7 +180,16 @@ export function ApplicantsPage() {
 
   return (
     <Stack>
-      <Title order={2}>Applicants</Title>
+      <Group justify="space-between">
+        <Title order={2}>Applicants</Title>
+        {canCreate && (
+          <Button onClick={() => setCreateOpen(true)}>New applicant</Button>
+        )}
+      </Group>
+
+      <Modal opened={createOpen} onClose={() => setCreateOpen(false)} title="New applicant">
+        <NewApplicantForm onDone={() => setCreateOpen(false)} />
+      </Modal>
 
       <Group align="flex-end">
         <Select

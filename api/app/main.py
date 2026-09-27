@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.routers import (
     admin,
+    applicant_create,
     applicants_read,
     auth,
     import_,
@@ -31,6 +32,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(status.router)
+app.include_router(applicant_create.router)
 app.include_router(import_.router)
 app.include_router(payment_claim.router)
 app.include_router(applicants_read.router)

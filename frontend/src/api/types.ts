@@ -94,6 +94,42 @@ export interface ApplicantDetail extends ApplicantSummary {
   import_batch_id: string | null;
 }
 
+/** Mirrors `api/app/schemas/applicant_create.py::ApplicantCreateRequest`
+ * exactly (Module 19) -- `POST /applicants`, the manual single-applicant
+ * creation endpoint. `assigned_counselor_id` is optional and
+ * role-dependent on the backend: an `ADMISSIONS_COUNSELOR` caller may
+ * omit it (auto-assigned to themselves) or send their own id; any other
+ * value is rejected with a real 422. A `SUPER_ADMIN`/
+ * `ADMISSIONS_MANAGER` caller may omit it (created unassigned) or send
+ * any existing, active `ADMISSIONS_COUNSELOR` account's id. No
+ * `current_status` or `import_batch_id` field -- the backend decides
+ * both itself (`APPLIED`, `NULL` respectively; see that router's own
+ * docstring for the full reasoning), never client-supplied.
+ */
+export interface ApplicantCreateRequest {
+  full_name: string;
+  email: string;
+  phone?: string | null;
+  program: string;
+  intake_cycle: string;
+  assigned_counselor_id?: string | null;
+}
+
+/** Mirrors `api/app/routers/applicant_create.py::_CounselorOption`
+ * exactly (Module 19) -- `GET /applicants/counselors`, the minimal
+ * assign-to picker lookup for `SUPER_ADMIN`/`ADMISSIONS_MANAGER`
+ * callers only. Deliberately narrower than `UserSummary` -- id and
+ * display name only, no sensitive/administrative fields -- since this
+ * endpoint's audience is wider than `GET /users`'s own `SUPER_ADMIN`
+ * -only gate.
+ */
+export interface CounselorOption {
+  id: string;
+  full_name: string;
+}
+
+
+
 /** Mirrors `api/app/schemas/reads.py::ApplicantStatusBreakdown`/
  * `ApplicantSummaryTotals` exactly -- the real `GET /applicants/summary`
  * response (Module 14). `by_status` is always present for all 8
