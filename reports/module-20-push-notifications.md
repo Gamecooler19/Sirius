@@ -364,10 +364,50 @@ trigger delivery against the now-dead subscription. Result:
   misattributed to whichever account happened to trigger the
   notification.
 
+### 5. Excel-import summary notification -- the one trigger this report had documented but never actually fired, closed with a real live test
+
+**A genuine gap, caught on review, not merely inspected away.** The
+Excel-import design decision (one summary notification per completed
+batch, `SUPER_ADMIN`/`ADMISSIONS_MANAGER` recipients) was documented
+in `import_.py`'s own docstring and wired into the route body, but
+this report's own first draft never actually fired a real import and
+watched a real notification arrive -- every claim about it rested on
+reading the code, the same gap the other three triggers had already
+closed with live proof. Closed here with the identical discipline:
+
+`admissionsmanager@sirius.app` established a real push subscription
+through the actual `ProfilePage` opt-in UI (confirmed via a
+`push_subscription` row-level check that `user_id` genuinely matched).
+A real `.xlsx` file (`openpyxl`, one header row plus one genuine data
+row -- `Import Trigger Test`, `import.trigger.test@example.com`, MBA,
+Fall2026) was generated and uploaded via a real
+`POST /import/applicants` multipart request -- the actual endpoint,
+not a synthetic call into `app.core.push` directly. Result: real
+`200`, `created_count: 1`, `status: "COMPLETED"`.
+
+The Windows push-notification event log showed a real toast delivered
+to Firefox at the identical second the import request completed
+(`17240 @ 18:07:32`, matching the request's own timestamp). Confirmed
+via `reg.getNotifications()` that the delivered notification read
+`{"title": "Import completed", "body": "import_test.xlsx: 1 new
+applicant(s) imported.", "data": {"url": "/import/history"}}` -- the
+real filename, the real created-row count, and a `data.url` routing to
+the real import-history page, exactly as the design decision's own
+reasoning specifies. This is the fourth and final real trigger path
+this module builds, now proven live the same way the other three are,
+closing the one gap a purely code-level review would have missed.
+
+Cleanup: the test applicant (`import.trigger.test@example.com`) and
+its own `import_batch` row were deleted directly from the database
+immediately after.
+
 ## Cleanup performed before treating this module as done
 
 - The real test applicant (`Push Test Applicant`) and its
   `application_status_event` row deleted directly from the database.
+- The real test applicant created by the live Excel-import trigger
+  test (`import.trigger.test@example.com`) and its own `import_batch`
+  row deleted directly.
 - All three original test payment claims (`NEGTEST-001`, `POSTEST-002`,
   `STALETEST-003`) deleted directly, plus two further test claims
   (`CLICKTEST-004`, `CLICKTEST-005`) created during the follow-up
@@ -416,6 +456,23 @@ trigger delivery against the now-dead subscription. Result:
   `frontend/src/api/client.ts`, `frontend/src/api/types.ts`,
   `frontend/src/main.tsx`, `frontend/src/pages/ProfilePage.tsx`); no
   stray temp files.
+- **Acceptance summary, stated explicitly rather than left implicit:**
+  all four real trigger paths this module builds (assigned-applicant
+  creation, unassigned-applicant creation via manager/admin, payment-
+  claim submission, and Excel-import batch completion) were each fired
+  for real against the live stack and each produced a real,
+  independently-observed OS-level toast at the Windows push-
+  notification-platform log layer, with payload content confirmed
+  correct in every case via `reg.getNotifications()` reading the
+  actual delivered object back. The one negative-exclusion requirement
+  (`FINANCE_STAFF` must receive nothing) was proven the same way, by
+  absence of a toast where one would otherwise have appeared. Dead-
+  subscription cleanup was proven with a genuinely induced `410` and a
+  confirmed row deletion, not a simulated one. Every one of these is
+  concrete, observed evidence -- real HTTP responses, real database
+  rows, a real third-party push service's own status codes, and a
+  real OS notification log -- not an inference from reading the
+  implementation.
 - The one real, honestly-stated limitation of this verification: the
   `notificationclick` handler's own client-navigation logic was
   verified by standard-API correctness and confirmed-correct payload
