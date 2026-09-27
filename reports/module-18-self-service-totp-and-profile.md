@@ -334,6 +334,64 @@ new one.
   consistency. Confirmed via a real login attempt afterward that
   `auditor@sirius.app` still authenticates normally.
 
+## Follow-up verification: the real 400 for a not-yet-enrolled account
+
+One gap remained open after the rest of this module's own verification:
+`POST /auth/totp/self-reset`'s own docstring and route body both claim a
+third, distinct `400` -- "TOTP is not currently enrolled for this
+account" -- for the case where the caller's account has never enrolled
+at all (`user.totp_enabled is False`), separate from either of the two
+credential-mismatch rejections ("current password is incorrect" /
+"invalid or expired TOTP code") Module 18's own live verification above
+already exercised. That third path had never actually been called
+against a real, live `totp_enabled=False` account and observed -- it was
+read off the code, not proven.
+
+**Finding the right account, live.** Queried the running database
+directly (`SELECT email, totp_enabled FROM "user"`, joined against
+`role`): `admissionsmanager@sirius.app` (`ADMISSIONS_MANAGER`) genuinely
+had `totp_enabled=false` at the moment of this check -- a real account
+still in its pre-opt-in state, not one that needed to be reset back into
+it. No reset-to-that-state step was necessary.
+
+**Call**: logged in as `admissionsmanager@sirius.app` for a real,
+fully-authenticated session (`totp_required: false` in the login
+response, confirming this account is neither TOTP-mandatory nor
+currently enrolled -- exactly the precondition this check needs), then
+called `POST /auth/totp/self-reset` directly with an otherwise
+well-formed body (`current_password` correct, `current_totp_code` a
+syntactically valid six-digit placeholder):
+
+```
+POST /auth/totp/self-reset
+{"current_password": "AdmissionsManager123!", "current_totp_code": "123456"}
+```
+
+**Real result**: `400`, body `{"detail": "TOTP is not currently
+enrolled for this account"}` -- confirmed live, not inferred. This is
+the exact literal string the route body raises on
+`user.totp_enabled is False`, checked *before* either the password or
+TOTP-code comparison runs (the placeholder code was never actually
+verified against anything, since the enrollment check short-circuits
+first) -- correctly and distinctly worded from the other two rejections:
+this says "you're not enrolled, use the opt-in/first-enrollment path
+instead" (`POST /auth/totp/enroll/start`), not "your credentials for
+your existing enrollment didn't check out." All three of this endpoint's
+documented `400` rejection reasons are now live-verified, each with its
+own distinct, real message:
+
+1. Not enrolled at all -- "TOTP is not currently enrolled for this
+   account" (this follow-up).
+2. Enrolled, wrong password -- "current password is incorrect" (Part 2
+   above).
+3. Enrolled, wrong/stale TOTP code -- "invalid or expired TOTP code"
+   (Part 2 above).
+
+No mutation occurred (this account's `totp_enabled` stayed `false`
+throughout, confirmed by the rejection itself never reaching the
+provisioning code path). No cleanup needed beyond deleting the one
+throwaway curl cookie jar used for this check.
+
 ## Final checks
 
 - `tsc --noEmit`: clean.
