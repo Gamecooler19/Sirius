@@ -401,6 +401,63 @@ Cleanup: the test applicant (`import.trigger.test@example.com`) and
 its own `import_batch` row were deleted directly from the database
 immediately after.
 
+### 6. Endpoint-level security properties -- validated directly, not only observed through the UI
+
+Three properties documented in `notifications.py`'s own docstring had
+only ever been *observed* indirectly through the browser UI's own
+behavior (e.g. re-subscribing appeared to work); each was tested
+directly against the real endpoints with curl to remove any doubt the
+UI was silently working around a gap:
+
+**Cross-account unsubscribe is a real no-op, not merely documented as
+one.** Logged in as `admissionsmanager@sirius.app`, called
+`DELETE /notifications/subscribe` with `financemanager@sirius.app`'s
+own real, still-active subscription endpoint (read directly from
+`push_subscription`). Result: real `204` (the endpoint's own
+documented "idempotent, never reveals whether the endpoint belonged to
+someone else" behavior) -- but critically, a direct follow-up query
+confirmed **the row was never deleted**: `financemanager`'s
+subscription was still present, completely untouched, immediately
+after. The `204` alone would not have distinguished "correctly scoped
+no-op" from "silently deleted someone else's subscription and lied
+about it with a generic success code" -- only the direct row check
+does, and that check now exists.
+
+**The upsert/ownership-transfer path was proven end to end via the
+real endpoint, not only inferred from the browser's own UI state.**
+Subscribed `admissionsmanager@sirius.app` to a real (test) endpoint via
+curl -- confirmed `user_id` and `p256dh` in the database matched.
+Logged in as `financemanager@sirius.app` and subscribed to the
+*identical* `endpoint` string. Result: the same row `id` (confirmed by
+primary key, not merely "a row with this endpoint exists again"), with
+`user_id` and both key fields (`p256dh`, `auth`) now genuinely
+belonging to `financemanager` -- the real ownership-transfer-on-
+collision behavior this router's own docstring claims, proven by
+reading the actual row back, not by trusting the `204` response alone.
+
+**Recipient-set exclusion was proven by absence of a delivery attempt,
+not merely absence of a role from a list.** `auditor@sirius.app` --
+visible to every applicant via RLS but deliberately excluded from the
+unassigned-applicant notification recipient set per this module's own
+design reasoning -- established a real subscription row (a
+syntactically valid but non-functional endpoint, since this check
+tests *recipient selection*, not delivery mechanics already proven in
+check 2). `admissionsmanager@sirius.app` (a real, genuine subscriber)
+created a real unassigned applicant. Result: the api container's own
+log shows **zero delivery attempt of any kind against `auditor`'s
+subscription** -- no `push delivery failed` warning, no trace of its
+fake endpoint anywhere -- while `admissionsmanager`'s own real
+subscription received a real, independently-confirmed Windows OS
+toast at the matching timestamp (`17241 @ 18:12:39`). This proves
+`get_active_user_ids_for_roles` genuinely excludes `auditor` at the
+recipient-resolution step itself, before any delivery is even
+attempted -- not merely that `auditor`'s delivery happened to fail for
+an unrelated reason.
+
+Cleanup: the recipient-validation test applicant, both synthetic
+(non-Mozilla) test subscriptions, and the temporary curl cookie jars
+used for this check were all deleted/removed immediately after.
+
 ## Cleanup performed before treating this module as done
 
 - The real test applicant (`Push Test Applicant`) and its
@@ -464,14 +521,26 @@ immediately after.
   independently-observed OS-level toast at the Windows push-
   notification-platform log layer, with payload content confirmed
   correct in every case via `reg.getNotifications()` reading the
-  actual delivered object back. The one negative-exclusion requirement
-  (`FINANCE_STAFF` must receive nothing) was proven the same way, by
-  absence of a toast where one would otherwise have appeared. Dead-
-  subscription cleanup was proven with a genuinely induced `410` and a
-  confirmed row deletion, not a simulated one. Every one of these is
-  concrete, observed evidence -- real HTTP responses, real database
-  rows, a real third-party push service's own status codes, and a
-  real OS notification log -- not an inference from reading the
+  actual delivered object back. The two negative-exclusion
+  requirements (`FINANCE_STAFF` must receive nothing for its own
+  submitted claim; `AUDITOR` must receive nothing for an unassigned
+  applicant despite RLS visibility) were each proven the same way, by
+  a genuinely subscribed account receiving no delivery attempt at all
+  (confirmed by the absence of any log trace touching its own
+  subscription), not merely by a role's absence from a source-code
+  list. Dead-subscription cleanup was proven with a genuinely induced
+  `410` and a confirmed row deletion, not a simulated one. The three
+  endpoint-level security properties this router's own docstring
+  claims (cross-account unsubscribe is a real no-op with the target
+  row provably untouched, not just a `204`; same-endpoint re-subscribe
+  from a different account genuinely transfers ownership at the row
+  level, confirmed by primary key; an unauthenticated `POST`/`DELETE`
+  is genuinely rejected with `401`) were each tested directly against
+  the real endpoints, not only inferred from the browser UI's own
+  observed behavior. Every one of these is concrete, observed evidence
+  -- real HTTP responses, real database rows read back and compared,
+  a real third-party push service's own status codes, and a real OS
+  notification log -- not an inference from reading the
   implementation.
 - The one real, honestly-stated limitation of this verification: the
   `notificationclick` handler's own client-navigation logic was
