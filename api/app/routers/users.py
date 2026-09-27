@@ -47,16 +47,21 @@ this account normally -- the guard is scoped to "acting on your own
 account," not "acting on any `SUPER_ADMIN` account."
 """
 
+import secrets
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.deps import require_role_session
-from app.core.security import hash_password
+from app.core.mail import send_mail
+from app.core.security import hash_password, hash_reset_token
 from app.core.sessions import destroy_sessions_for_user
 from app.models.enums import RoleCode
+from app.models.password_reset_token import PasswordResetToken
 from app.models.role import Role
 from app.models.user import User
 from app.schemas.users import (
@@ -67,6 +72,19 @@ from app.schemas.users import (
 )
 
 router = APIRouter(prefix="/users", tags=["users"])
+settings = get_settings()
+
+# Module 17: how long a welcome/activation link stays valid. Deliberately
+# much longer than a password-reset token's own 30 minutes
+# (`app.routers.auth.PASSWORD_RESET_TOKEN_TTL_MINUTES`) -- a password
+# reset is something the account holder initiated themselves, seconds
+# before checking their inbox; a welcome email is something an
+# *administrator* initiated on the new hire's behalf, and the new hire
+# may not check their inbox (or even have started their first day yet)
+# for hours. 24 hours is generous enough to cover "created Friday
+# afternoon, activated Monday morning" without being so long that a
+# stale, unredeemed welcome link becomes a standing risk.
+WELCOME_TOKEN_TTL_HOURS = 24
 
 
 def _to_summary(user: User, role_code: str) -> UserSummary:
@@ -78,6 +96,7 @@ def _to_summary(user: User, role_code: str) -> UserSummary:
         is_active=user.is_active,
         totp_enabled=user.totp_enabled,
         last_login_at=user.last_login_at,
+        activated_at=user.activated_at,
         created_at=user.created_at,
     )
 
@@ -128,10 +147,46 @@ async def create_user(
     (`User.is_active`'s own `server_default`), `totp_enabled=False`
     always -- see this module's own docstring for why that second
     default is the entire mechanism that makes a mandatory-TOTP role's
-    new account go through the real enrollment flow on first login. The
-    password is hashed via the exact same `hash_password` (Argon2id)
-    every other account's credential goes through -- no separate,
-    admin-only hashing path.
+    new account go through the real enrollment flow on first login.
+
+    **No admin-supplied initial password at all (Module 17).** The
+    admin never sees, chooses, or transmits any credential for the new
+    account -- `UserCreateRequest` has no `password` field (see that
+    schema's own docstring). Instead:
+
+    1. `password_hash` is set to a real Argon2id hash of a fresh
+       `secrets.token_urlsafe(32)` value, generated here, used once for
+       this single `hash_password` call, and then discarded -- never
+       logged, stored anywhere else, or transmitted. **This is what
+       makes login genuinely impossible for this account until
+       activation, not a null column or a special-cased check in the
+       login route.** `POST /auth/login`'s own `verify_password` call
+       runs unmodified against this hash exactly like any other
+       account's; it will simply never match any password a caller can
+       submit, since the plaintext behind it was thrown away the
+       instant this function returned. `User.activated_at` stays `NULL`
+       for this row (see that column's own docstring) -- a display-only
+       signal, not itself a login gate; the unguessable password hash
+       is the actual gate.
+    2. A single-use, hashed, expiring token is issued through the exact
+       same `PasswordResetToken` table and `hash_reset_token` helper
+       Module 16 already built for `POST /auth/forgot-password` --
+       reused verbatim, not forked. `new_email` stays `NULL` (a
+       password-type token; see that model's own docstring for why
+       this makes it redeemable by the *existing*
+       `POST /auth/reset-password` with zero new redemption code).
+    3. A real welcome email is sent through Mailpit, containing a link
+       to `{FRONTEND_BASE_URL}/set-initial-password?token=...` --
+       **deliberately no TOTP setup instructions or secret of any kind
+       in this email**, even for a mandatory-TOTP role. TOTP enrollment
+       happens through the exact same in-app flow every account
+       (seeded or admin-created) has always gone through, driven by
+       `POST /auth/login`'s own `totp_enrollment_required` flag on the
+       account's first real login -- putting a QR code or secret in an
+       email would be a strictly weaker channel for a credential this
+       codebase otherwise takes care to keep server-side-generated and
+       shown only once, in-session, to the account holder themselves
+       (see `totp_enroll_start`'s own docstring).
     """
     _, db = user_and_db
 
@@ -147,15 +202,47 @@ async def create_user(
     if role_row is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "unknown role")
 
+    # Real Argon2id hash of a value nobody, including this process after
+    # this line, ever sees again -- see this route's own docstring point 1.
+    unusable_password = secrets.token_urlsafe(32)
     user = User(
         email=body.email,
         full_name=body.full_name,
-        password_hash=hash_password(body.password),
+        password_hash=hash_password(unusable_password),
         role_id=role_row.id,
+        activated_at=None,
     )
     db.add(user)
     await db.flush()
     await db.refresh(user)
+
+    raw_token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+        hours=WELCOME_TOKEN_TTL_HOURS
+    )
+    db.add(
+        PasswordResetToken(
+            user_id=user.id,
+            token_hash=hash_reset_token(raw_token),
+            expires_at=expires_at,
+        )
+    )
+    await db.flush()
+
+    activation_link = f"{settings.FRONTEND_BASE_URL}/set-initial-password?token={raw_token}"
+    await send_mail(
+        to_address=user.email,
+        subject="Welcome to Sirius -- activate your account",
+        body=(
+            f"An account has been created for you on Sirius ({body.role_code.value}).\n\n"
+            f"Set your password to activate your account using this link: "
+            f"{activation_link}\n\n"
+            f"This link expires in {WELCOME_TOKEN_TTL_HOURS} hours and can only be "
+            "used once.\n\n"
+            "You will be prompted to set up two-factor authentication the first "
+            "time you sign in, if your role requires it."
+        ),
+    )
 
     return _to_summary(user, body.role_code.value)
 

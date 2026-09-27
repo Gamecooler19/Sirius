@@ -33,6 +33,7 @@ class UserSummary(BaseModel):
     is_active: bool
     totp_enabled: bool
     last_login_at: datetime | None
+    activated_at: datetime | None
     created_at: datetime
 
 
@@ -49,18 +50,25 @@ class UserCreateRequest(BaseModel):
     (Module 11's manual seed inserts) has always populated it, and there
     is no legitimate "nameless account" case for an admin-created user.
 
-    Deliberately has no `is_active` or `totp_enabled` field: a new
-    account is always created active (an admin creating a disabled
-    account is not a real use case this module supports; deactivation is
-    a separate, explicit `PATCH` afterward) and always with
-    `totp_enabled=False` -- see `app.routers.users.create_user`'s own
-    docstring for why that specific default is load-bearing, not
-    incidental.
+    **Deliberately has no `password` field (Module 17).** An admin
+    creating an account no longer supplies, sees, or transmits any
+    initial credential at all -- see `app.routers.users.create_user`'s
+    own docstring for the full reasoning. The new account is issued a
+    real, single-use welcome token and emailed a link to set its own
+    first password, exactly the same infrastructure
+    `POST /auth/forgot-password` already established (Module 16), not a
+    parallel mechanism.
+
+    Also has no `is_active` or `totp_enabled` field: a new account is
+    always created active (an admin creating a disabled account is not
+    a real use case this module supports; deactivation is a separate,
+    explicit `PATCH` afterward) and always with `totp_enabled=False` --
+    see `app.routers.users.create_user`'s own docstring for why that
+    specific default is load-bearing, not incidental.
     """
 
     email: EmailStr
     full_name: str
-    password: str
     role_code: RoleCode
 
 

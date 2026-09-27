@@ -4,7 +4,10 @@ import { useMutation } from "@tanstack/react-query";
 import { api } from "./client";
 import { useInvalidateMe } from "./useMe";
 import type {
+  ChangeEmailRequest,
+  ChangeEmailResponse,
   ChangePasswordRequest,
+  ConfirmEmailChangeRequest,
   ForgotPasswordRequest,
   ForgotPasswordResponse,
   LoginRequest,
@@ -91,5 +94,30 @@ export function useForgotPassword() {
 export function useResetPassword() {
   return useMutation({
     mutationFn: (body: ResetPasswordRequest) => api.post<void>("/auth/reset-password", body),
+  });
+}
+
+/** `POST /auth/change-email` (Module 17). Authenticated -- invalidates
+ * `/auth/me` on success so `ProfilePage` immediately shows the new
+ * `pending_email` (the account's own *current* `email` does not change
+ * yet; only the pending-state indicator does).
+ */
+export function useChangeEmail() {
+  const invalidateMe = useInvalidateMe();
+  return useMutation({
+    mutationFn: (body: ChangeEmailRequest) =>
+      api.post<ChangeEmailResponse>("/auth/change-email", body),
+    onSuccess: () => invalidateMe(),
+  });
+}
+
+/** `POST /auth/confirm-email-change` (Module 17). Unauthenticated --
+ * the raw token from the confirmation email (sent to the new address)
+ * is the entire request.
+ */
+export function useConfirmEmailChange() {
+  return useMutation({
+    mutationFn: (body: ConfirmEmailChangeRequest) =>
+      api.post<void>("/auth/confirm-email-change", body),
   });
 }

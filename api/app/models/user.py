@@ -14,6 +14,31 @@ moment a code is verified or provisioned.
 request (not only at login) by the RBAC dependency, so deactivating an
 account takes effect on the very next request rather than waiting for a
 session to expire.
+
+`activated_at` (Module 17, nullable): `NULL` for an admin-created account
+that has never yet set a real, self-chosen password -- see
+`app.routers.users.create_user`'s own docstring for why such an account's
+`password_hash` is a real Argon2id hash of an unguessable, never-revealed
+random value rather than a null/sentinel column, and why that alone
+(not this column) is what makes login genuinely impossible in that
+window. This column exists for a narrower purpose: telling an
+already-active, never-activated account (an admin-created account whose
+welcome link nobody has clicked yet) apart from an ordinary already-
+activated account, for display purposes (`UsersPage`'s own "pending
+activation" indicator) -- `is_active` alone cannot make that distinction,
+since both states have `is_active=True` by construction (see
+`create_user`'s own docstring for why deactivation is deliberately kept
+a separate, unrelated concept from activation). Stamped the first time
+`POST /auth/reset-password` succeeds for this account, whether that
+call redeemed the original welcome token or an ordinary later
+forgot-password token -- both redemption paths are identical code (see
+`PasswordResetToken`'s own docstring), so this column answers "has this
+account ever successfully set a password," not "was it specifically the
+welcome flow." Existing accounts from before this module (every
+manually-seeded and Module-15-admin-created account, which always had
+an admin-supplied real password from the start) are backfilled to their
+own `created_at` by this module's own migration, so none of them are
+misread as pending.
 """
 
 import uuid
@@ -44,6 +69,7 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
 
     last_login_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    activated_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
 
 class UserBackupCode(UUIDPKMixin, Base):

@@ -46,6 +46,13 @@ export interface MeResponse {
   full_name: string;
   role_code: RoleCode;
   totp_enabled: boolean;
+  /** Mirrors `api/app/schemas/auth.py::MeResponse.pending_email` exactly
+   * (Module 17) -- `null` unless a self-service email-change is
+   * genuinely in flight for this account (a real, unexpired, unused
+   * confirmation token exists). Decision: shown, not hidden -- see that
+   * schema's own docstring for the full reasoning.
+   */
+  pending_email: string | null;
 }
 
 /** Mirrors `api/app/models/enums.ApplicationStatus` exactly -- the fixed
@@ -347,18 +354,41 @@ export interface ForgotPasswordResponse {
 /** Mirrors `api/app/schemas/auth.py::ResetPasswordRequest` exactly
  * (Module 16). `token` is the raw, single-use value from the reset
  * email's link (a `?token=` query parameter this page reads off its own
- * URL) -- never a user id or email.
+ * URL) -- never a user id or email. Also the exact request shape
+ * `SetInitialPasswordPage` uses (Module 17) -- `POST /auth/reset-password`
+ * redeems a welcome token identically to an ordinary reset token; see
+ * that route's own docstring.
  */
 export interface ResetPasswordRequest {
   token: string;
   new_password: string;
 }
 
-/** Mirrors `api/app/schemas/users.py::UserSummary` exactly (Module 15)
- * -- one row of `GET /users`, and the shape `POST /users`/
- * `PATCH /users/{id}`/`POST /users/{id}/reset-totp` all return.
- * Deliberately has no `password_hash`/`totp_secret_encrypted` field --
- * the backend response never carries either.
+/** Mirrors `api/app/schemas/auth.py::ChangeEmailRequest`/
+ * `ChangeEmailResponse` exactly (Module 17). `POST /auth/change-email`
+ * never reveals whether `new_email` is already taken -- see that
+ * schema's own docstring.
+ */
+export interface ChangeEmailRequest {
+  new_email: string;
+}
+
+export interface ChangeEmailResponse {
+  message: string;
+}
+
+/** Mirrors `api/app/schemas/auth.py::ConfirmEmailChangeRequest` exactly
+ * (Module 17).
+ */
+export interface ConfirmEmailChangeRequest {
+  token: string;
+}
+
+/** Mirrors `api/app/schemas/users.py::UserSummary` exactly (Module 15,
+ * extended Module 17) -- one row of `GET /users`, and the shape
+ * `POST /users`/`PATCH /users/{id}`/`POST /users/{id}/reset-totp` all
+ * return. Deliberately has no `password_hash`/`totp_secret_encrypted`
+ * field -- the backend response never carries either.
  */
 export interface UserSummary {
   id: string;
@@ -368,6 +398,11 @@ export interface UserSummary {
   is_active: boolean;
   totp_enabled: boolean;
   last_login_at: string | null;
+  /** `null` means this account has never successfully set a password
+   * -- an admin-created account whose welcome link nobody has clicked
+   * yet (Module 17). See `User.activated_at`'s own backend docstring.
+   */
+  activated_at: string | null;
   created_at: string;
 }
 
@@ -378,11 +413,16 @@ export interface UserListResponse {
   offset: number;
 }
 
-/** Mirrors `api/app/schemas/users.py::UserCreateRequest` exactly. */
+/** Mirrors `api/app/schemas/users.py::UserCreateRequest` exactly
+ * (Module 15, Module 17 dropped `password`). Deliberately has no
+ * `password` field -- an admin creating an account no longer supplies
+ * one at all; see that schema's own backend docstring for the full
+ * reasoning (a real welcome email with a single-use activation link
+ * replaces it).
+ */
 export interface UserCreateRequest {
   email: string;
   full_name: string;
-  password: string;
   role_code: RoleCode;
 }
 

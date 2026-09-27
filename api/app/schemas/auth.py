@@ -41,11 +41,19 @@ class TotpBackupCodeRequest(BaseModel):
 
 
 class MeResponse(BaseModel):
+    """`GET /auth/me`. `pending_email` (Module 17, `None` unless a
+    self-service email-change is genuinely in flight for this account)
+    is the frontend's own decided-and-implemented visibility choice --
+    see `app.routers.auth.me`'s own docstring for the full reasoning on
+    why an in-flight change is shown, not hidden.
+    """
+
     user_id: uuid.UUID
     email: str
     full_name: str
     role_code: str
     totp_enabled: bool
+    pending_email: str | None = None
 
 
 class ChangePasswordRequest(BaseModel):
@@ -97,3 +105,41 @@ class ResetPasswordRequest(BaseModel):
 
     token: str
     new_password: str
+
+
+class ChangeEmailRequest(BaseModel):
+    """`POST /auth/change-email` (Module 17). Authenticated -- requires
+    the caller's own already-verified session, the same
+    `get_current_user` dependency `change_password` uses, since this
+    mutates a security-sensitive identity field. Takes only the
+    proposed new address; the account's *current* email is sourced
+    exclusively from the session, never the request body, the same
+    "trust the session" rule `ChangePasswordRequest`'s own docstring
+    already establishes.
+    """
+
+    new_email: EmailStr
+
+
+class ChangeEmailResponse(BaseModel):
+    """Confirms the request was accepted and a confirmation email was
+    sent to `new_email` -- deliberately does not confirm whether
+    `new_email` is *available* (not already in use by a different
+    account); see `app.routers.auth.change_email`'s own docstring for
+    why that check is silent by design, the same anti-enumeration
+    reasoning `POST /auth/forgot-password` already established, applied
+    here to prevent an authenticated caller from using this endpoint to
+    probe which arbitrary addresses are already registered accounts.
+    """
+
+    message: str
+
+
+class ConfirmEmailChangeRequest(BaseModel):
+    """`POST /auth/confirm-email-change` (Module 17). Unauthenticated --
+    the raw token from the confirmation email is the caller's entire
+    proof they control the new mailbox, the same shape
+    `ResetPasswordRequest` already establishes for password tokens.
+    """
+
+    token: str

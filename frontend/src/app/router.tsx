@@ -4,6 +4,8 @@ import { AppShellLayout } from "./AppShellLayout";
 import { LoginPage } from "../pages/LoginPage";
 import { ForgotPasswordPage } from "../pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "../pages/ResetPasswordPage";
+import { SetInitialPasswordPage } from "../pages/SetInitialPasswordPage";
+import { ConfirmEmailChangePage } from "../pages/ConfirmEmailChangePage";
 import { HomePage } from "../pages/HomePage";
 import { ProfilePage } from "../pages/ProfilePage";
 import { ApplicantsPage } from "../applicants/ApplicantsPage";
@@ -25,6 +27,14 @@ const router = createBrowserRouter([
   {
     path: "/reset-password",
     element: <ResetPasswordPage />,
+  },
+  {
+    path: "/set-initial-password",
+    element: <SetInitialPasswordPage />,
+  },
+  {
+    path: "/confirm-email-change",
+    element: <ConfirmEmailChangePage />,
   },
   {
     path: "/",

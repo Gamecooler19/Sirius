@@ -63,7 +63,10 @@ from app.models.password_reset_token import PasswordResetToken
 from app.models.role import Role
 from app.models.user import User, UserBackupCode
 from app.schemas.auth import (
+    ChangeEmailRequest,
+    ChangeEmailResponse,
     ChangePasswordRequest,
+    ConfirmEmailChangeRequest,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
     LoginRequest,
@@ -420,18 +423,25 @@ async def reset_password(
     body: ResetPasswordRequest,
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Completes a self-service password reset (Module 16). Unauthenticated
-    by definition -- the raw token from the email link is the caller's
-    entire proof of identity here, exactly as a TOTP backup code is for
+    """Completes a self-service password reset, **or an admin-created
+    account's first-ever activation (Module 17)** -- both are the exact
+    same redemption code, deliberately. Unauthenticated by definition --
+    the raw token from the email link is the caller's entire proof of
+    identity here, exactly as a TOTP backup code is for
     `/auth/totp/verify-backup-code`.
 
     **Token lookup is by hash comparison against every un-used,
-    unexpired token row**, the same shape `totp_verify_backup_code`
-    already uses for backup codes (there is no way to look up a row by
-    its own hash directly with Argon2id's own random salt -- each
-    `_hasher.verify` call is against one candidate row). In practice
-    this table holds at most a handful of live rows per user at once,
-    never enough for this linear scan to matter.
+    unexpired, password-type token row** (`new_email IS NULL` --
+    Module 17 extended this table to also carry email-change tokens,
+    which are redeemed only by the distinct
+    `POST /auth/confirm-email-change`; this filter keeps the two
+    token kinds from ever being redeemable through each other's
+    endpoint), the same shape `totp_verify_backup_code` already uses
+    for backup codes (there is no way to look up a row by its own hash
+    directly with Argon2id's own random salt -- each `_hasher.verify`
+    call is against one candidate row). In practice this table holds at
+    most a handful of live rows per user at once, never enough for this
+    linear scan to matter.
 
     **Real, distinct rejection reasons** -- never a generic "invalid
     token" for every failure mode, matching this module's own
@@ -450,6 +460,15 @@ async def reset_password(
       the generic "invalid or expired" bucket alongside a token that
       never existed at all.
 
+    **Stamps `User.activated_at` if this is the account's first-ever
+    successful redemption** (Module 17) -- `activated_at is None` is
+    checked *before* the write, so an ordinary later forgot-password
+    reset against an already-activated account never touches this
+    column again; it only ever transitions once, from `NULL` to a real
+    timestamp, on whichever redemption -- the original welcome token or
+    a subsequent forgot-password token, doesn't matter which -- happens
+    to be the account's first.
+
     **Force-logs-out any active session for this account**, via
     `destroy_sessions_for_user` -- the same reasoning
     `app.routers.users.reset_totp` already established for an admin-
@@ -458,11 +477,16 @@ async def reset_password(
     credential (forgotten, or possibly compromised), and a session that
     authenticated with the *old* password should not be assumed safe
     to leave running just because it happened to be open at the moment
-    of reset.
+    of reset. For a first-activation redemption specifically, there is
+    no prior session to kill (an unactivated account's unguessable
+    password hash makes login structurally impossible until this exact
+    call succeeds), so this is a genuine no-op in that case, not a
+    special-cased skip.
     """
     incoming_hash_candidates = await db.execute(
         select(PasswordResetToken).where(
             PasswordResetToken.used_at.is_(None),
+            PasswordResetToken.new_email.is_(None),
             PasswordResetToken.expires_at > datetime.now(timezone.utc).replace(tzinfo=None),
         )
     )
@@ -477,7 +501,10 @@ async def reset_password(
         # see this route's own docstring for why only this one case
         # gets a separate, real message.
         already_used_result = await db.execute(
-            select(PasswordResetToken).where(PasswordResetToken.used_at.is_not(None))
+            select(PasswordResetToken).where(
+                PasswordResetToken.used_at.is_not(None),
+                PasswordResetToken.new_email.is_(None),
+            )
         )
         for candidate in already_used_result.scalars().all():
             if verify_reset_token(body.token, candidate.token_hash):
@@ -492,10 +519,175 @@ async def reset_password(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid or expired reset token")
 
     user.password_hash = hash_password(body.new_password)
+    if user.activated_at is None:
+        user.activated_at = datetime.now(timezone.utc).replace(tzinfo=None)
     matched.used_at = datetime.now(timezone.utc).replace(tzinfo=None)
     await db.flush()
 
     await destroy_sessions_for_user(user.id)
+
+
+@router.post("/change-email", response_model=ChangeEmailResponse)
+async def change_email(
+    body: ChangeEmailRequest,
+    session: SessionData = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ChangeEmailResponse:
+    """Self-service email-change request (Module 17). Requires a fully
+    authenticated session (`get_current_user`, the same dependency
+    `change_password` uses) -- unlike the password-reset/welcome flows,
+    there is no "locked out, no session" scenario for this action; the
+    account holder is, by definition, already signed in to request it.
+
+    **Does not change `User.email` at all.** Only a real, single-use,
+    hashed, expiring token is issued -- through the exact same
+    `PasswordResetToken` table Module 16 built, with `new_email` set
+    (see that model's own docstring for why this field is what
+    distinguishes an email-change token from a password-type one) --
+    and a real confirmation email is sent through Mailpit to the
+    **new** address, not the current one. The account continues
+    authenticating with its current email, completely unaffected, until
+    `POST /auth/confirm-email-change` is called with that link's token
+    (see that route's own docstring for what actually changes and
+    when).
+
+    **Silently does not reveal whether `new_email` is already taken by
+    a different account.** If it is, this call still returns the same
+    success response and still issues a token -- but a token whose
+    `new_email` collides with an existing account's email at
+    confirmation time is rejected then, not now (see
+    `confirm_email_change`'s own docstring). Checking availability here
+    and returning a different response for "already taken" would let
+    any authenticated caller enumerate which arbitrary addresses are
+    registered accounts, the exact same anti-enumeration reasoning
+    `POST /auth/forgot-password` already established for an
+    *unauthenticated* caller -- this endpoint closes the same gap for
+    an *authenticated* one probing on someone else's behalf.
+    """
+    user_id = uuid.UUID(session.user_id)
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "account not found")
+
+    raw_token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+        minutes=PASSWORD_RESET_TOKEN_TTL_MINUTES
+    )
+    db.add(
+        PasswordResetToken(
+            user_id=user.id,
+            token_hash=hash_reset_token(raw_token),
+            expires_at=expires_at,
+            new_email=body.new_email,
+        )
+    )
+    await db.flush()
+
+    confirm_link = f"{settings.FRONTEND_BASE_URL}/confirm-email-change?token={raw_token}"
+    await send_mail(
+        to_address=body.new_email,
+        subject="Confirm your new Sirius email address",
+        body=(
+            "A request was made to change the email address on a Sirius "
+            f"account to this address ({body.new_email}).\n\n"
+            f"Confirm this change using this link: {confirm_link}\n\n"
+            f"This link expires in {PASSWORD_RESET_TOKEN_TTL_MINUTES} minutes "
+            "and can only be used once. Your account will keep signing in "
+            "with its current email until you confirm.\n\n"
+            "If you did not request this, you can safely ignore this email -- "
+            "your account's email address will not change."
+        ),
+    )
+
+    return ChangeEmailResponse(
+        message="Confirmation email sent to the new address. Your login email "
+        "will not change until you confirm."
+    )
+
+
+@router.post("/confirm-email-change", status_code=status.HTTP_204_NO_CONTENT)
+async def confirm_email_change(
+    body: ConfirmEmailChangeRequest,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Completes a self-service email change (Module 17). Unauthenticated
+    by definition -- the raw token from the confirmation email, sent to
+    the *new* address, is the caller's entire proof they control that
+    mailbox; nothing else authenticates this request, the same shape
+    `POST /auth/reset-password` already establishes for password
+    tokens.
+
+    **Token lookup is by hash comparison against every un-used,
+    unexpired, email-change token row** (`new_email IS NOT NULL` --
+    the mirror-image filter of `reset_password`'s own `IS NULL`, so the
+    two token kinds stay mutually exclusive at redemption time). Same
+    real, distinct rejection reasons as password-token redemption:
+    "invalid or expired reset token" for no match, a separate
+    "this reset link has already been used" for a token that matches by
+    hash but was already redeemed.
+
+    **Checks `new_email` availability now, not at request time** (see
+    `change_email`'s own docstring for why the *request* side stays
+    silent about it) -- if some other account has taken that email in
+    the interval between request and confirmation, this call rejects
+    with a real, specific reason rather than silently overwriting into
+    a collision the database's own `uq_user_email` constraint would
+    reject anyway with a much less useful integrity-error message.
+
+    **Only `User.email` changes here.** No session is force-logged-out
+    (contrast `reset_password`'s own session kill) -- the account's
+    existing sessions authenticated against its identity at the time
+    they were created and remain exactly as valid as they were before
+    this call; only the *email* used for future logins changes, not
+    the account's current authenticated state.
+    """
+    incoming_hash_candidates = await db.execute(
+        select(PasswordResetToken).where(
+            PasswordResetToken.used_at.is_(None),
+            PasswordResetToken.new_email.is_not(None),
+            PasswordResetToken.expires_at > datetime.now(timezone.utc).replace(tzinfo=None),
+        )
+    )
+    matched: PasswordResetToken | None = None
+    for candidate in incoming_hash_candidates.scalars().all():
+        if verify_reset_token(body.token, candidate.token_hash):
+            matched = candidate
+            break
+
+    if matched is None:
+        already_used_result = await db.execute(
+            select(PasswordResetToken).where(
+                PasswordResetToken.used_at.is_not(None),
+                PasswordResetToken.new_email.is_not(None),
+            )
+        )
+        for candidate in already_used_result.scalars().all():
+            if verify_reset_token(body.token, candidate.token_hash):
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST, "this confirmation link has already been used"
+                )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid or expired confirmation token")
+
+    user_result = await db.execute(select(User).where(User.id == matched.user_id))
+    user = user_result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid or expired confirmation token")
+
+    assert matched.new_email is not None  # guaranteed by the query filter above
+    collision = (
+        await db.execute(
+            select(User.id).where(User.email == matched.new_email, User.id != user.id)
+        )
+    ).scalar_one_or_none()
+    if collision is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "this email address is now in use by another account"
+        )
+
+    user.email = matched.new_email
+    matched.used_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.flush()
 
 
 @router.get("/me", response_model=MeResponse)
@@ -507,6 +699,19 @@ async def me(
     -- a TOTP-pending session must still be able to call `/me` to find out
     which account it belongs to and whether enrollment is needed, even
     though it cannot reach any RLS-scoped business route yet.
+
+    **`pending_email` (Module 17) -- decision: an in-flight,
+    unconfirmed email change is shown, not hidden.** If this account
+    has a real, unexpired, unused email-change token row, its
+    `new_email` is surfaced here so `ProfilePage` can display "pending
+    change to X." The alternative (staying silent until confirmation)
+    would leave the account holder with no way to tell, short of
+    checking the new inbox themselves, whether their own change request
+    actually registered -- indistinguishable from the request having
+    silently failed. Showing it costs nothing security-relevant: this
+    is the account's own authenticated session reading back its own
+    pending state, not a third party learning anything about a
+    different account.
     """
     user_id = uuid.UUID(session.user_id)
     result = await db.execute(select(User).where(User.id == user_id))
@@ -514,12 +719,26 @@ async def me(
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "account not found")
 
+    pending_result = await db.execute(
+        select(PasswordResetToken.new_email)
+        .where(
+            PasswordResetToken.user_id == user_id,
+            PasswordResetToken.new_email.is_not(None),
+            PasswordResetToken.used_at.is_(None),
+            PasswordResetToken.expires_at > datetime.now(timezone.utc).replace(tzinfo=None),
+        )
+        .order_by(PasswordResetToken.created_at.desc())
+        .limit(1)
+    )
+    pending_email = pending_result.scalar_one_or_none()
+
     return MeResponse(
         user_id=user.id,
         email=user.email,
         full_name=user.full_name,
         role_code=session.role_code,
         totp_enabled=user.totp_enabled,
+        pending_email=pending_email,
     )
 
 

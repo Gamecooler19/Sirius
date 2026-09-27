@@ -71,7 +71,6 @@ function CreateUserForm({ onDone }: { onDone: () => void }) {
     initialValues: {
       email: "",
       full_name: "",
-      password: "",
       role_code: "" as RoleCode | "",
     },
   });
@@ -83,7 +82,6 @@ function CreateUserForm({ onDone }: { onDone: () => void }) {
       await createUser.mutateAsync({
         email: values.email,
         full_name: values.full_name,
-        password: values.password,
         role_code: values.role_code,
       });
       form.reset();
@@ -101,14 +99,13 @@ function CreateUserForm({ onDone }: { onDone: () => void }) {
             {error}
           </Alert>
         )}
+        <Text size="sm" c="dimmed">
+          No initial password is set here (Module 17) -- the new account
+          gets a real welcome email with a link to set its own password
+          and activate the account.
+        </Text>
         <TextInput label="Email" required {...form.getInputProps("email")} />
         <TextInput label="Full name" required {...form.getInputProps("full_name")} />
-        <TextInput
-          label="Initial password"
-          required
-          type="password"
-          {...form.getInputProps("password")}
-        />
         <Select
           label="Role"
           required
@@ -216,9 +213,18 @@ export function UsersPage() {
                         <Badge variant="light">{user.role_code}</Badge>
                       </Table.Td>
                       <Table.Td>
-                        <Badge color={user.is_active ? "green" : "red"} variant="light">
-                          {user.is_active ? "Active" : "Inactive"}
-                        </Badge>
+                        <Group gap={4}>
+                          <Badge color={user.is_active ? "green" : "red"} variant="light">
+                            {user.is_active ? "Active" : "Inactive"}
+                          </Badge>
+                          {user.activated_at === null && (
+                            <Tooltip label="This account has not yet set a password through its welcome email -- it cannot log in until it does">
+                              <Badge color="yellow" variant="light">
+                                Pending activation
+                              </Badge>
+                            </Tooltip>
+                          )}
+                        </Group>
                       </Table.Td>
                       <Table.Td>
                         <Badge color={user.totp_enabled ? "green" : "gray"} variant="light">
