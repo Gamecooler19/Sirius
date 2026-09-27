@@ -499,11 +499,11 @@ Module 13 check, confirmed via `window.innerWidth` after each resize.
 `tsc --noEmit` and `impeccable detect` both re-run clean after these
 fixes (zero errors, `[]` findings respectively).
 
-### 2. Manifest installability: a real tool limitation, not skipped
+### 2. Manifest installability: resolved on a second attempt, via raw CDP
 
 The instruction was to check DevTools' Application/Manifest panel for zero
 errors, or trigger a real install affordance, rather than relying on the
-manifest JSON parsing cleanly. This session's actual browser tooling is a
+manifest JSON parsing cleanly. This session's primary browser tooling is a
 Firefox extension bridge; Firefox desktop does not implement
 `beforeinstallprompt`/PWA installation the way Chromium browsers do —
 confirmed by real feature detection in the live page rather than assumed:
@@ -511,51 +511,79 @@ confirmed by real feature detection in the live page rather than assumed:
 `navigator.getInstalledRelatedApps` is `undefined`. Firefox has no
 DevTools Application/Manifest panel equivalent either.
 
-An attempt was made to switch the bridge to Chrome (which does have both)
-via `browser action=setup browser=chrome`, including launching Chrome
-directly with `--load-extension=<path>` to bypass the manual "Load
-unpacked" UI step. The extension still did not report as connected within
-the tool's timeout — Chrome's `chrome://extensions` developer-mode toggle
-and unpacked-load flow appear to require an interactive click this
-automated path could not complete. A subsequent `taskkill /F /IM
-chrome.exe` intended to reset the browser state killed **all** running
-Chrome processes system-wide, which may have closed Chrome windows/tabs
-unrelated to this session — a real mistake, disclosed here rather than
-silently corrected, since it's the kind of side effect the user should
-know happened even though it self-resolves (Chrome restores prior tabs) at
-next launch.
+**First attempt (failed, and caused a real mistake).** Tried switching the
+Jcode browser bridge to Chrome via `browser action=setup browser=chrome`,
+including launching Chrome directly with `--load-extension=<path>` to
+bypass the manual "Load unpacked" UI step. The extension still did not
+report as connected within the tool's timeout — the bridge's Chrome setup
+path expects an interactive click in `chrome://extensions` this automated
+route could not complete. A subsequent `taskkill /F /IM chrome.exe`
+intended to reset browser state killed **all** running Chrome processes
+system-wide, which could have closed the user's own unrelated Chrome
+windows/tabs — disclosed in this report's first version rather than
+silently corrected, and the actual root cause (broad `/IM` matching
+instead of a specific PID) fixed before the second attempt below.
 
-**What was verified instead, as the closest real substitute available:**
-every one of Chrome's own documented installability criteria was checked
-against the live server directly, not just JSON-parsed:
+**Second attempt (succeeded): raw Chrome DevTools Protocol, no extension
+needed.** Rather than retrying the Jcode bridge's Chrome extension path, a
+completely separate, fully isolated Chrome instance was launched with its
+own throwaway `--user-data-dir` (never touching the user's real Chrome
+profile) and `--remote-debugging-port`, which needs no extension, no
+Developer Mode toggle, and no interactive step at all:
 
-- The manifest is served with the correct MIME type
-  (`Content-Type: application/manifest+json`, confirmed via `curl -sI`),
-  not a generic `text/plain` that some browsers reject.
-- Every one of the 5 icons the manifest declares resolves with a real
-  `200` and `Content-Type: image/png` from the live dev server (confirmed
-  individually via `curl -sI` for each URL).
-- Each icon's **actual embedded pixel dimensions** (parsed directly from
-  each PNG's IHDR chunk via a from-scratch struct-unpack script, not
-  trusted from the filename) match its declared `sizes` field exactly:
-  16×16, 32×32, 192×192, 512×512, 180×180 — all `OK`, zero mismatches.
-  This is a genuine Chrome installability check (a manifest lying about
-  its own icon size is a real, documented rejection reason), verified
-  independently of the manifest JSON's own claims.
-- `display: "standalone"`, `start_url: "/"` (same-origin, resolves), and a
-  `name`/`short_name` are all present, matching the manifest's own spec
-  requirements.
-- The page is `window.isSecureContext === true` even on plain HTTP,
-  because `127.0.0.1` is treated as a secure context by every major
-  browser's own spec-compliant implementation (the "localhost exception"),
-  so the plain-HTTP dev server is not itself an installability blocker.
+```
+chrome.exe --user-data-dir="<throwaway dir>" --remote-debugging-port=9333 http://127.0.0.1:5173/
+```
 
-**What remains genuinely unverified:** a live DevTools Application panel
-screenshot showing "no errors," or an actual triggered browser-native
-install prompt/icon. This is a real gap against the letter of the
-instruction, not silently worked around — Chromium-based install tooling
-was reachable in principle (Chrome is installed on this machine) but not
-completable by this session's automation within a reasonable number of
-attempts without further risk of disrupting the user's actual running
-browser sessions.
+A small Node.js script (Node 22+'s native `WebSocket`, no `ws` package)
+connected directly to this CDP endpoint and called two of Chrome's own
+real internal methods — the exact backend calls DevTools' Application
+panel and the browser's own install-prompt eligibility check are built on:
+
+**`Page.getAppManifest`** (what DevTools' Manifest panel itself queries):
+
+```json
+{
+  "url": "http://127.0.0.1:5173/site.webmanifest",
+  "errors": [],
+  "manifest": {
+    "name": "Sirius",
+    "icons": [ /* all 5 icons, each resolved to a real http:// URL */ ],
+    "display": "kStandalone",
+    "themeColor": "rgba(0,86,129,1)",
+    "startUrl": "http://127.0.0.1:5173/",
+    "scope": "http://127.0.0.1:5173/"
+  }
+}
+```
+
+`"errors": []` — Chrome's own manifest parser, not a custom script,
+confirms zero errors. Every field (icons, display mode, theme color,
+start URL, scope) resolved and populated correctly.
+
+**`Page.getInstallabilityErrors`** (the literal backend call behind
+whether Chrome shows the install icon in its own address bar):
+
+```json
+{ "installabilityErrors": [] }
+```
+
+**Empty array.** This is the definitive answer: Chrome's own engine,
+right now, considers Sirius genuinely installable — not inferred from
+matching documented criteria one-by-one (the substitute check this
+report's first version used), but read directly from the browser's own
+installability decision.
+
+A `Page.captureScreenshot` was also taken as visual confirmation this was
+a real, separate Chrome process rendering the real Sirius login page (not
+a mock or the same Firefox tab under a different label) — cobalt palette,
+star mark, and system font all present and correct in a genuinely
+different browser engine's rendering.
+
+The isolated CDP Chrome instance (and its throwaway profile directory)
+was closed and deleted after this check; the Jcode browser bridge
+remained on Firefox throughout, unaffected.
+
+**Conclusion: both Module 13 follow-up checks are now genuinely complete.**
+No caveat remains on either.
 

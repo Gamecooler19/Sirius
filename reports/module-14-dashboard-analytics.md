@@ -256,9 +256,14 @@ applicant-only (with real RLS narrowing on top), and finance-only.
 - `frontend/src/auth/roles.ts` -- `DASHBOARD_APPLICANTS_ROLES`,
   `DASHBOARD_FINANCE_ROLES`.
 - `frontend/src/pages/HomePage.tsx` -- full rewrite: two role-gated
-  dashboard sections replacing the Module 13 static intro card (which is
-  retained as `WelcomeIntro`, the fallback for a role in neither
-  dashboard group).
+  dashboard sections replacing the Module 13 static intro card. The old
+  card is retained as `WelcomeIntro`, rendered only when a session's role
+  is in neither `DASHBOARD_APPLICANTS_ROLES` nor `DASHBOARD_FINANCE_ROLES`.
+  No current role reaches this path: all six roles fall into at least one
+  of the two dashboard groups today (see the Follow-up section below for
+  the exhaustive per-role accounting). `WelcomeIntro` exists as
+  forward-compatible scaffolding for a role added in a future module that
+  genuinely belongs in neither group, not as a presently-reachable screen.
 
 **Data used (already existed from Module 13's own follow-up seeding,
 reused rather than reseeded):** 12 applicants, real status transitions,
@@ -266,3 +271,91 @@ real payment claims, plus 2 applicants freshly assigned to
 `admissionscounselor@sirius.app` via a direct SQL `UPDATE` (the one
 legitimate direct-SQL use in this project's established pattern -- no
 assignment endpoint exists yet to do this through the API).
+
+## Follow-up verification
+
+One gap in this module's own original verification, closed against the
+same live stack and the same seed data already sitting in it -- no new
+fixtures. The check confirmed the existing design and caught a real
+documentation inaccuracy in this report's own first version; no code
+change was needed.
+
+### 1. `ADMISSIONS_MANAGER`'s dashboard, checked at the UI level, not just via curl
+
+Every role combination this module's original verification exercised
+(`AUDITOR`, `ADMISSIONS_COUNSELOR`, `FINANCE_STAFF`) was checked live in
+the browser. The fourth structurally distinct combination --
+`ADMISSIONS_MANAGER`, who is in `DASHBOARD_APPLICANTS_ROLES` but not
+RLS-narrowed the way `ADMISSIONS_COUNSELOR` is (no `assigned_counselor_id`
+restriction applies to this role), and who is in neither
+`DASHBOARD_FINANCE_ROLES` -- had only been checked via a raw `curl`
+request against `GET /applicants/summary` directly, not through the real
+rendered page. That is a real gap: a curl response proves the backend
+endpoint works, not that the frontend's role-gating logic, query hook, and
+render tree actually reach the same conclusion for this specific role in
+the browser.
+
+Logged in as `admissionsmanager@sirius.app` through the real login form
+(fresh session, not a reused cookie), navigated to `/`, and took a live
+screenshot:
+
+```
+Applicants by status
+  Imported: 2       Applied: 1        In process: 2     On hold: 1
+  Admission offered: 2   Admission taken: 2   Rejected: 1   Withdrawn: 1
+```
+
+This is an **exact match** to the same independent psql `GROUP BY` used
+earlier in this report (2/1/2/1/2/2/1/1, total 12) -- the true unscoped
+total, since `ADMISSIONS_MANAGER` is not narrowed by RLS the way
+`ADMISSIONS_COUNSELOR` is. Confirmed the "Finance totals" heading and
+every finance card are genuinely absent from the DOM, not merely
+off-screen or visually hidden:
+
+```js
+document.body.textContent.includes('Finance totals') // => false
+```
+
+Nav also correctly showed only Home/Applicants/Import applicants/Import
+history -- no Finance/Reconciliation, matching `ADMISSIONS_MANAGER`'s
+existing nav-gate scope.
+
+This completes the fourth and final structurally distinct role
+combination at the UI level (the other three were already covered):
+both-sections (`AUDITOR`), applicant-only-with-RLS-narrowing
+(`ADMISSIONS_COUNSELOR`), finance-only (`FINANCE_STAFF`), and now
+applicant-only-with-the-real-unscoped-total (`ADMISSIONS_MANAGER`).
+
+### 2. `WelcomeIntro`'s framing corrected
+
+This report's first version described `WelcomeIntro` as "the fallback for
+a role in neither dashboard group" without stating plainly whether any
+role currently reaches it. Checking `DASHBOARD_APPLICANTS_ROLES` (
+`SUPER_ADMIN`/`ADMISSIONS_MANAGER`/`ADMISSIONS_COUNSELOR`/`AUDITOR`) and
+`DASHBOARD_FINANCE_ROLES` (`SUPER_ADMIN`/`FINANCE_STAFF`/
+`FINANCE_MANAGER`/`AUDITOR`) against the full six-role `RoleCode` enum
+confirms every one of the six roles is a member of at least one set:
+
+| Role | In `DASHBOARD_APPLICANTS_ROLES`? | In `DASHBOARD_FINANCE_ROLES`? |
+|---|---|---|
+| `SUPER_ADMIN` | yes | yes |
+| `ADMISSIONS_MANAGER` | yes | no |
+| `ADMISSIONS_COUNSELOR` | yes | no |
+| `FINANCE_STAFF` | no | yes |
+| `FINANCE_MANAGER` | no | yes |
+| `AUDITOR` | yes | yes |
+
+No row has "no" in both columns. **No current role can reach
+`WelcomeIntro` today.** It exists as forward-compatible scaffolding --
+correct and harmless to keep, since a future role that genuinely
+belongs in neither group would otherwise hit a blank Home page -- but
+this report's "Files changed" section (above) has been corrected to say
+so plainly rather than leaving it implied.
+
+### Regression checks (unchanged)
+
+`tsc --noEmit` and `impeccable detect --json frontend/src` were re-run
+after this follow-up; both remain clean (zero errors, `[]` findings). No
+code changed as a result of this follow-up -- both findings confirmed the
+existing implementation was already correct.
+
