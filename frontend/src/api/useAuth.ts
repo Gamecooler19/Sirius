@@ -6,6 +6,7 @@ import { useInvalidateMe } from "./useMe";
 import type {
   ChangeEmailRequest,
   ChangeEmailResponse,
+  ChangeNameRequest,
   ChangePasswordRequest,
   ConfirmEmailChangeRequest,
   ForgotPasswordRequest,
@@ -13,6 +14,7 @@ import type {
   LoginRequest,
   LoginResponse,
   ResetPasswordRequest,
+  SelfTotpResetRequest,
   TotpBackupCodeRequest,
   TotpEnrollConfirmRequest,
   TotpEnrollStartResponse,
@@ -73,6 +75,33 @@ export function useTotpVerifyBackupCode() {
 export function useChangePassword() {
   return useMutation({
     mutationFn: (body: ChangePasswordRequest) => api.post<void>("/auth/change-password", body),
+  });
+}
+
+/** `POST /auth/change-name` (Module 18). Invalidates `/auth/me` on
+ * success so `ProfilePage`'s own summary card and `UsersPage`'s
+ * "Full name" column both reflect the new value immediately, unlike
+ * `useChangePassword` above (which changes nothing `/auth/me` reports).
+ */
+export function useChangeName() {
+  const invalidateMe = useInvalidateMe();
+  return useMutation({
+    mutationFn: (body: ChangeNameRequest) => api.post<void>("/auth/change-name", body),
+    onSuccess: () => invalidateMe(),
+  });
+}
+
+/** `POST /auth/totp/self-reset` (Module 18). Returns the same
+ * `TotpEnrollStartResponse` shape `useTotpEnrollStart` does -- a fresh
+ * QR/backup-code pair the caller must still confirm via
+ * `useTotpEnrollConfirm`. No `/auth/me` invalidation here: `totp_enabled`
+ * does not flip back to `true` until that confirm step succeeds, the
+ * same two-step shape ordinary enrollment already follows.
+ */
+export function useTotpSelfReset() {
+  return useMutation({
+    mutationFn: (body: SelfTotpResetRequest) =>
+      api.post<TotpEnrollStartResponse>("/auth/totp/self-reset", body),
   });
 }
 

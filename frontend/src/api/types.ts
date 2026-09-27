@@ -337,6 +337,25 @@ export interface ChangePasswordRequest {
   new_password: string;
 }
 
+/** Mirrors `api/app/schemas/auth.py::ChangeNameRequest` exactly
+ * (Module 18) -- deliberately has no user-id field, same "trust the
+ * session" reasoning as `ChangePasswordRequest`.
+ */
+export interface ChangeNameRequest {
+  full_name: string;
+}
+
+/** Mirrors `api/app/schemas/auth.py::SelfTotpResetRequest` exactly
+ * (Module 18). `POST /auth/totp/self-reset` requires both fields --
+ * see that schema's own docstring for why the current TOTP code
+ * specifically (not merely the password) is the load-bearing part of
+ * this guard.
+ */
+export interface SelfTotpResetRequest {
+  current_password: string;
+  current_totp_code: string;
+}
+
 /** Mirrors `api/app/schemas/auth.py::ForgotPasswordRequest`/
  * `ForgotPasswordResponse` exactly (Module 16). `POST /auth/forgot-password`
  * always returns the identical `message` regardless of whether the email

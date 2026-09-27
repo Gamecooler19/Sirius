@@ -4,21 +4,41 @@ TOTP enrollment/verification for roles that require it, and logout.
 **Login flow.**
 1. `POST /auth/login`: verify email+password. On success, create a Valkey
    session with `totp_verified` pre-set to whatever it should start as:
-   - Role not in `MANDATORY_TOTP_ROLES`: `totp_verified=True` immediately --
-     TOTP is not required for this role, so there is nothing to wait for.
-   - Role in `MANDATORY_TOTP_ROLES`, TOTP already enrolled
-     (`user.totp_enabled=True`): `totp_verified=False` -- the session exists
-     but cannot reach any protected route until `/auth/totp/verify` succeeds.
-   - Role in `MANDATORY_TOTP_ROLES`, TOTP not yet enrolled: same as above,
-     `totp_verified=False`; the client is told (`totp_enrollment_required`)
-     to drive the user through `/auth/totp/enroll/start` +
-     `/auth/totp/enroll/confirm` before `/auth/totp/verify` becomes usable
-     for future logins.
+   - `user.totp_enabled=True` (this account has a live, confirmed TOTP
+     secret -- whether because its role mandates enrollment, or because
+     it voluntarily enrolled through `ProfilePage`'s own opt-in path,
+     Module 18): `totp_verified=False` regardless of role -- **TOTP
+     enrollment state, not role membership, is what actually gates a
+     session at login** (see Module 18's own follow-up correction below
+     for why this distinction is load-bearing, not incidental).
+   - `user.totp_enabled=False` and role in `MANDATORY_TOTP_ROLES`:
+     `totp_verified=False`; the client is told
+     (`totp_enrollment_required`) to drive the user through
+     `/auth/totp/enroll/start` + `/auth/totp/enroll/confirm` before
+     `/auth/totp/verify` becomes usable for future logins.
+   - `user.totp_enabled=False` and role not in `MANDATORY_TOTP_ROLES`:
+     `totp_verified=True` immediately -- nothing enrolled, nothing
+     mandated, nothing to wait for.
 2. The session cookie is set (httpOnly/SameSite=Strict, Secure per
    settings) covering this TOTP-pending state too -- there is exactly one
    cookie for the whole login-to-fully-authenticated flow, not a separate
    pre-auth cookie, since Valkey's own `totp_verified` flag is what actually
    gates access (`app.core.deps.get_current_user`), not cookie possession.
+
+**Module 18 correction: login used to gate purely on role membership,
+not on actual enrollment state.** The original logic here was
+`totp_verified_initial = not (role in MANDATORY_TOTP_ROLES)` --
+correct for the three mandatory roles, but silently wrong for any
+account that is TOTP-enrolled *without* its role requiring it: such an
+account would sail straight through login with `totp_verified=True`,
+never once being asked for its own already-configured second factor.
+This was a real, live gap surfaced by Module 18's own voluntary-
+enrollment feature for `ADMISSIONS_COUNSELOR`/`ADMISSIONS_MANAGER`/
+`AUDITOR` -- enrolling voluntarily would have been enrollment theater,
+a QR code and backup codes that a subsequent login never actually
+checks. Fixed by keying the initial `totp_verified` value off
+`user.totp_enabled` first, falling back to role mandate only when
+`totp_enabled` is `False` -- see the route body below.
 
 **Why enrollment start/confirm both require an existing (TOTP-pending)
 session rather than a fresh unauthenticated call.** Enrollment provisions a
@@ -53,8 +73,10 @@ from app.core.security import (
 from app.core.sessions import (
     SessionData,
     create_session,
+    destroy_other_sessions_for_user,
     destroy_session,
     destroy_sessions_for_user,
+    mark_totp_pending,
     mark_totp_verified,
 )
 from app.core.totp import generate_backup_codes, provision_secret, verify_code
@@ -65,6 +87,7 @@ from app.models.user import User, UserBackupCode
 from app.schemas.auth import (
     ChangeEmailRequest,
     ChangeEmailResponse,
+    ChangeNameRequest,
     ChangePasswordRequest,
     ConfirmEmailChangeRequest,
     ForgotPasswordRequest,
@@ -73,6 +96,7 @@ from app.schemas.auth import (
     LoginResponse,
     MeResponse,
     ResetPasswordRequest,
+    SelfTotpResetRequest,
     TotpBackupCodeRequest,
     TotpEnrollConfirmRequest,
     TotpEnrollStartResponse,
@@ -123,7 +147,11 @@ async def login(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid email or password")
 
     totp_mandatory = RoleCode(role_code) in MANDATORY_TOTP_ROLES
-    totp_verified_initial = not totp_mandatory
+    # Module 18: gate on actual enrollment state first, role mandate only
+    # as the fallback for an account that has never enrolled at all --
+    # see this module's own docstring for the real gap this closes.
+    totp_active = user.totp_enabled or totp_mandatory
+    totp_verified_initial = not totp_active
 
     session_id = await create_session(
         user_id=user.id, role_code=role_code, totp_verified=totp_verified_initial
@@ -133,8 +161,8 @@ async def login(
     return LoginResponse(
         user_id=user.id,
         role_code=role_code,
-        totp_required=totp_mandatory,
-        totp_enrollment_required=totp_mandatory and not user.totp_enabled,
+        totp_required=totp_active,
+        totp_enrollment_required=totp_active and not user.totp_enabled,
     )
 
 
@@ -316,6 +344,151 @@ async def change_password(
 
     user.password_hash = hash_password(body.new_password)
     await db.flush()
+
+
+@router.post("/change-name", status_code=status.HTTP_204_NO_CONTENT)
+async def change_name(
+    body: ChangeNameRequest,
+    session: SessionData = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Self-service name change (Module 18). Depends on `get_current_user`,
+    the same dependency `change_password`/`change_email` use, for
+    consistency with every other self-service profile mutation in this
+    router -- not because a display name is itself security-sensitive
+    the way a password or email is.
+
+    **No confirmation step, no token, no force-logout.** A name is not
+    a credential and does not affect anything `get_current_user`,
+    `require_role`, or any RLS policy checks -- it is pure display data
+    (`UsersPage`'s "Full name" column, `ProfilePage`'s own summary
+    card). Every other self-service mutation in this router that *does*
+    require a confirmation step or a force-logout does so because it
+    changes something used to *authenticate* the account (email,
+    password, TOTP secret); a name change changes none of those, so
+    none of that machinery applies here -- adding it would be
+    ceremony without a real threat it defends against.
+
+    **Identity is sourced exclusively from the session**, same
+    "trust the session" rule as every other endpoint in this router --
+    no `user_id` field exists on `ChangeNameRequest` at all.
+    """
+    user_id = uuid.UUID(session.user_id)
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "account not found")
+
+    user.full_name = body.full_name
+    await db.flush()
+
+
+@router.post("/totp/self-reset", response_model=TotpEnrollStartResponse)
+async def totp_self_reset(
+    body: SelfTotpResetRequest,
+    request: Request,
+    session: SessionData = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TotpEnrollStartResponse:
+    """Voluntary self-service TOTP re-enrollment for an *already-enrolled*
+    account (Module 18) -- e.g. a new phone, or simply wanting a fresh
+    secret and backup-code set. Depends on `get_current_user`: the
+    caller must already be a fully, currently-TOTP-verified session
+    (not merely a TOTP-pending one) before it can even attempt this,
+    the same baseline `change_password`/`change_email` require.
+
+    **Requires both the current password and a live, currently-valid
+    TOTP code from the *existing* secret -- not either alone.** This is
+    the load-bearing design decision, not an incidental strictness
+    choice:
+
+    - A password check alone would let an attacker who has only
+      compromised the password (phished, reused, leaked from another
+      breach) strip the account's real second factor and install their
+      own, exactly defeating the entire point of TOTP mandating a
+      factor beyond "something you know." The existing secret is the
+      one thing a password-only attacker does not have.
+    - Requiring the *current* TOTP code specifically (not, say, a
+      backup code, and not the *new* secret's code, which does not
+      exist yet at this point in the flow) proves the caller currently
+      possesses the physical device/app already enrolled -- the same
+      property `get_current_user`'s own `totp_verified` check already
+      established for reaching this route at all, checked again here
+      because the *consequence* of this specific action (discarding
+      that very secret) is different in kind from an ordinary
+      protected read or write.
+    - `verify_code` is checked against the account's *existing*
+      `totp_secret_encrypted`, decrypted for this one comparison and
+      discarded immediately after, the same pattern `totp_verify`
+      itself already uses -- no new decryption pathway, no new
+      exposure window for the raw secret.
+
+    **On success: disables the old secret, force-logs-out every
+    *other* session for this account, but keeps the current session
+    alive and flips it back to TOTP-pending** (`mark_totp_pending`,
+    `app.core.sessions`) rather than destroying it -- see that
+    function's own docstring, and `destroy_other_sessions_for_user`'s,
+    for why this is a genuine, deliberate divergence from
+    `destroy_sessions_for_user`'s blanket behavior, not the same call
+    reused unchanged: killing the very session performing this reset
+    would break the multi-step flow (self-reset, then immediately
+    `enroll/start` + `enroll/confirm`) it is itself in the middle of.
+    A second, separately-authenticated session for this same account
+    (a different browser, a different device) is a real residual-
+    access risk this action exists to close -- see
+    `destroy_other_sessions_for_user`'s own docstring for the full
+    reasoning on why that one is not spared.
+
+    **Returns the same shape `totp_enroll_start` returns** (a fresh
+    provisioning URI and ten fresh backup codes) -- this endpoint
+    performs the disable-then-reprovision in one call rather than
+    requiring the client to separately call `disable` then
+    `enroll/start`, since the two are only ever meaningful together
+    here (there is no legitimate "disable TOTP and leave it disabled"
+    self-service action for an account that is TOTP-enrolled for a
+    mandatory role). The old backup codes are deleted the same way
+    `totp_enroll_start` already deletes them on a fresh enrollment
+    (both a mandatory-role re-enrollment and this self-reset share that
+    same "old codes cannot outlive the secret they were issued
+    alongside" rule). The client must still call
+    `POST /auth/totp/enroll/confirm` with a live code from the *new*
+    secret to actually flip `totp_enabled` back to `True` -- exactly
+    the same two-step shape every other enrollment in this app follows,
+    reused verbatim rather than forking a distinct confirm endpoint for
+    this flow.
+    """
+    user_id = uuid.UUID(session.user_id)
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None or not user.totp_enabled or user.totp_secret_encrypted is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "TOTP is not currently enrolled for this account")
+
+    if not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "current password is incorrect")
+
+    existing_secret = decrypt_totp_secret(user.totp_secret_encrypted)
+    if not verify_code(existing_secret, body.current_totp_code):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid or expired TOTP code")
+
+    raw_secret, uri = provision_secret(user.email)
+    user.totp_secret_encrypted = encrypt_totp_secret(raw_secret)
+    user.totp_enabled = False
+
+    await db.execute(
+        UserBackupCode.__table__.delete().where(UserBackupCode.user_id == user_id)
+    )
+    backup_codes = generate_backup_codes()
+    for code in backup_codes:
+        db.add(UserBackupCode(user_id=user_id, code_hash=hash_backup_code(code)))
+
+    await db.flush()
+
+    session_id = request.cookies.get("sirius_session")
+    if session_id:
+        await destroy_other_sessions_for_user(user_id, keep_session_id=session_id)
+        await mark_totp_pending(session_id)
+
+    return TotpEnrollStartResponse(provisioning_uri=uri, backup_codes=backup_codes)
 
 
 @router.post("/forgot-password", response_model=ForgotPasswordResponse)

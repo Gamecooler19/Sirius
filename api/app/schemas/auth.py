@@ -72,6 +72,21 @@ class ChangePasswordRequest(BaseModel):
     new_password: str
 
 
+class ChangeNameRequest(BaseModel):
+    """`POST /auth/change-name` (Module 18). Same "trust the session,
+    never the body" rule as `ChangePasswordRequest` -- no user id field;
+    the target account is sourced exclusively from the authenticated
+    session. Unlike an email or password change, a name change is not a
+    security-sensitive credential, so there is no confirmation step,
+    no token, and no force-logout of other sessions -- it takes effect
+    immediately on write, the same way `PATCH /users/{id}`'s own
+    `role_code`/`is_active` fields do for an admin acting on someone
+    else's account.
+    """
+
+    full_name: str
+
+
 class ForgotPasswordRequest(BaseModel):
     """`POST /auth/forgot-password` (Module 16). Unauthenticated by
     definition -- a locked-out user has no session. Takes only an email;
@@ -143,3 +158,21 @@ class ConfirmEmailChangeRequest(BaseModel):
     """
 
     token: str
+
+
+class SelfTotpResetRequest(BaseModel):
+    """`POST /auth/totp/self-reset` (Module 18). Voluntary self-service
+    re-enrollment for an *already-enrolled* account -- e.g. a new phone,
+    or simply wanting a fresh secret. Requires **both** the account's
+    current password and a live, currently-valid TOTP code from the
+    *existing* secret, not either alone -- see
+    `app.routers.auth.totp_self_reset`'s own docstring for why the
+    second factor specifically is the load-bearing part of this guard,
+    not merely a stricter version of `ChangePasswordRequest`.
+
+    No user id field, same "trust the session" rule as every other
+    self-service credential mutation in this router.
+    """
+
+    current_password: str
+    current_totp_code: str

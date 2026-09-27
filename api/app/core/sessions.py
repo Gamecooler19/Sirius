@@ -102,6 +102,30 @@ async def mark_totp_verified(session_id: str) -> None:
     await r.set(_session_key(session_id), payload, ex=SESSION_TTL_SECONDS, keepttl=False)
 
 
+async def mark_totp_pending(session_id: str) -> None:
+    """The mirror-image write of `mark_totp_verified` (Module 18,
+    `POST /auth/totp/self-reset`): flips an already-verified session's
+    `totp_verified` back to `False` in place, without deleting the
+    session itself. This is what actually forces the *same* session
+    that just disabled its own old TOTP secret through a real,
+    fresh `enroll/start` + `enroll/confirm` cycle before it can reach
+    any route depending on `get_current_user` again -- the session
+    stays alive (`get_current_session` still resolves it, which is all
+    `enroll/start`/`enroll/confirm` themselves require), but is back in
+    the same TOTP-pending state a brand new mandatory-TOTP login
+    produces, closing the window where a self-reset account could
+    otherwise keep using protected routes on the strength of a second
+    factor it just voluntarily discarded.
+    """
+    data = await read_session(session_id)
+    if data is None:
+        return
+    data.totp_verified = False
+    payload = encrypt_session_payload(json.dumps(asdict(data)))
+    r = get_valkey()
+    await r.set(_session_key(session_id), payload, ex=SESSION_TTL_SECONDS, keepttl=False)
+
+
 async def destroy_session(session_id: str) -> None:
     r = get_valkey()
     data = await read_session(session_id)
@@ -124,4 +148,47 @@ async def destroy_sessions_for_user(user_id: uuid.UUID) -> int:
     for session_id in session_ids:
         deleted += await r.delete(_session_key(session_id))
     await r.delete(user_key)
+    return deleted
+
+
+async def destroy_other_sessions_for_user(user_id: uuid.UUID, keep_session_id: str) -> int:
+    """Force-logout every session for this user **except** one
+    (Module 18, `POST /auth/totp/self-reset`) -- a genuine, deliberate
+    variant of `destroy_sessions_for_user`'s blanket behavior, not the
+    same call reused unchanged.
+
+    **Why this needs to exist separately.** Self-service TOTP
+    re-enrollment is, by construction, performed *from within* an
+    already-live, fully-authenticated session -- the caller is sitting
+    in the middle of the very request that is about to invalidate every
+    session for their own account. `destroy_sessions_for_user`'s
+    blanket "delete every session this user has open" would delete the
+    acting session too, breaking the multi-step flow it is itself
+    running (self-reset succeeds, then the client immediately calls
+    `/auth/totp/enroll/start` + `/confirm` against what it still
+    believes is a live session -- a session that blanket deletion would
+    have just destroyed out from under it). The threat model this
+    force-logout defends against is a *different* device or browser
+    that authenticated earlier and is still sitting on the old,
+    now-replaced second factor; the session actively performing the
+    reset is not that threat, it is the legitimate action itself.
+
+    Reads the same `user_sessions:{user_id}` index `create_session`
+    maintains, deletes every member except `keep_session_id`, and
+    removes only the deleted ids from the index set (not the whole set,
+    unlike `destroy_sessions_for_user`) so the surviving session stays
+    correctly tracked in it. Returns the number of *other* sessions
+    actually deleted.
+    """
+    r = get_valkey()
+    user_key = _user_sessions_key(str(user_id))
+    session_ids = await r.smembers(user_key)
+    deleted = 0
+    for session_id in session_ids:
+        if session_id == keep_session_id:
+            continue
+        removed = await r.delete(_session_key(session_id))
+        if removed:
+            await r.srem(user_key, session_id)
+        deleted += removed
     return deleted
