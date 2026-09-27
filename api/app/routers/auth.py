@@ -39,7 +39,7 @@ from app.core.crypto import decrypt_totp_secret, encrypt_totp_secret
 from app.core.db import get_db
 from app.core.deps import get_client_ip, get_current_session, get_current_user
 from app.core.mail import send_mail
-from app.core.rate_limit import check_forgot_password_rate_limit
+from app.core.rate_limit import check_change_email_rate_limit, check_forgot_password_rate_limit
 from app.core.security import (
     hash_backup_code,
     hash_password,
@@ -563,7 +563,21 @@ async def change_email(
     `POST /auth/forgot-password` already established for an
     *unauthenticated* caller -- this endpoint closes the same gap for
     an *authenticated* one probing on someone else's behalf.
+
+    **Rate-limited per target `new_email` (Module 17 follow-up), before
+    any write.** Being authenticated only proves who the *caller* is --
+    it does not prove the caller owns `new_email`, so this endpoint has
+    the identical third-party-mail-bombing exposure
+    `POST /auth/forgot-password` already has, and gets the identical
+    fix: `check_change_email_rate_limit` (`app.core.rate_limit`) raises
+    a real `429` after the third request aimed at the same target
+    address within 15 minutes, regardless of which authenticated
+    account is doing the requesting -- see that function's own
+    docstring for why it is keyed by the target address, not the
+    caller's account.
     """
+    await check_change_email_rate_limit(body.new_email)
+
     user_id = uuid.UUID(session.user_id)
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()

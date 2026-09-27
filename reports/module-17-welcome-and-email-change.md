@@ -293,3 +293,130 @@ accounts confirmed backfilled with `activated: true`.
   findings.
 - `git status`: only this module's own files touched; no stray temp
   files.
+
+## Follow-up verification
+
+Two real gaps closed after this module's original verification, the
+same shape every prior follow-up in this project used.
+
+### 1. Rate limiting for `POST /auth/change-email`
+
+**Decision: yes, needed, and implemented** -- the same conclusion
+Module 16's own follow-up reached for `forgot-password`, extended
+here rather than accepted as a difference.
+
+**Why being authenticated does not change the answer.** The task
+description's own framing was checked directly rather than assumed:
+does `change-email` genuinely create the identical third-party-
+mail-bombing exposure `forgot-password` has? Yes. `change-email`
+requires `get_current_user`, but that dependency only proves *who the
+caller is* -- it proves nothing about whether the caller owns
+`new_email`, the address the side effect (a real email) actually
+lands on. An authenticated `ADMISSIONS_COUNSELOR` account can name
+`victim@sirius.app` as `new_email` and this endpoint will happily
+send that address mail, repeatedly, with no proof of ownership
+required -- mechanically the same gap `forgot-password` has for an
+unauthenticated caller naming an arbitrary email. The harm lands on a
+third party (whoever owns the named address) either way, not on the
+caller's own account, which is the actual load-bearing fact -- not
+"is the caller authenticated." Being authenticated only means the
+*caller* is accountable and identifiable after the fact (their own
+session is on record); it does not mean the *target* consented to
+receiving the mail, which is what the rate limit actually protects
+against.
+
+**Considered and rejected: no limiter, on the theory that
+authentication alone is a sufficient deterrent.** Rejected because an
+attacker does not need a *fresh* or *anonymous* account to abuse
+this -- any already-compromised, or even a legitimately-owned but
+malicious, authenticated session can target an arbitrary victim
+address with the exact same lack of ownership proof an unauthenticated
+`forgot-password` caller has. "The caller had to log in first" raises
+the bar for who can attempt this at all, but does not lower the
+per-attempt harm to the victim once someone clears that bar, and this
+codebase already has plenty of ordinary, legitimately-issued accounts
+(every role) capable of clearing it.
+
+**Implementation.** Reused the exact Valkey fixed-window pattern
+`check_forgot_password_rate_limit` already established
+(`app.core.rate_limit`): new `check_change_email_rate_limit`, same
+threshold (3 requests / 15-minute window), same `INCR`+`EXPIRE`
+mechanism, factored through a shared `_check_fixed_window_rate_limit`
+helper both functions now call rather than duplicating the counter
+logic a second time. **Keyed by the target `new_email`** (lowercased),
+under a distinct `change_email_rl:` prefix so the two endpoints'
+windows never share or interfere with each other's counts -- not by
+the calling account, for the same reason `forgot-password`'s own
+limiter is not keyed by caller IP: the threat is "this address gets
+flooded regardless of who is doing the flooding." A limiter keyed by
+the caller's own account would let a single attacker rotate through
+several different authenticated accounts (or simply reuse the same
+one, since nothing here throttles requests *from* an account) to keep
+sending the same victim address confirmation mail past any
+per-account ceiling; keying by the target address closes that
+regardless of how many different accounts are involved. Checked
+before any database work or token issuance, in `change_email` itself.
+
+**Live verification, real HTTP responses, genuine repeated requests**
+(same methodology as Module 16's own follow-up):
+
+- Logged in as `admissionscounselor@sirius.app`, sent 4 real
+  `POST /auth/change-email` requests to the identical target address
+  (`ratelimit-target@sirius.app`) in sequence: requests 1-3 -> real
+  `200` with the real success body; request 4 -> real `429`,
+  `{"detail":"too many email-change requests for this address; try
+  again later"}`.
+- Confirmed via `valkey-cli GET`/`TTL` on the real key
+  (`change_email_rl:ratelimit-target@sirius.app`) that the counter
+  (value `5` after the test sequence) and its ~900-second expiry are
+  genuinely present in Valkey, not merely inferred from response
+  codes.
+- **Keyed-by-target, not by caller, confirmed directly**: logged in
+  as a completely different account (`auditor@sirius.app`) and sent a
+  `POST /auth/change-email` naming the *same*, already-throttled
+  target address -- real `429`, from a session that had made zero
+  prior requests of its own. Proves the limiter protects the victim
+  address regardless of which account is doing the requesting, not
+  merely the requesting account's own quota.
+- Confirmed normal single-request flow is unaffected: the same
+  second account requesting a change to a fresh, never-targeted
+  address (`fresh-unthrottled-target@sirius.app`) -> real `200`,
+  and a distinct Valkey key (`change_email_rl:fresh-unthrottled-
+  target@sirius.app`) created for it, independent of the throttled
+  one.
+- All test Valkey keys, Mailpit messages, and `password_reset_token`
+  rows created by this verification were deleted afterward.
+
+### 2. Expired-token rejection for `confirm-email-change`
+
+Module 16's own expired-token test only covered password-reset
+tokens; `confirm-email-change` has its own distinct query and rejection
+branches, so this was checked directly rather than assumed to behave
+identically by symmetry with `reset-password`.
+
+Requested a real email change from `admissionscounselor@sirius.app`
+to `expiry-test-target@sirius.app`, extracted the real raw token from
+Mailpit's own API, located that exact row in `password_reset_token`
+by its real `id`, then forced `expires_at` five minutes into the past
+via a direct `UPDATE` -- the identical technique Module 16 used for
+password-reset tokens, applied here to an email-change row instead
+(the only practical way to test a 30-minute TTL without an actual
+30-minute wait).
+
+Attempting to confirm that now-expired token -> real `400`,
+`"invalid or expired confirmation token"` -- **correctly the generic
+bucket, not misrouted into the "already been used" branch**, confirming
+the `expires_at > now()` filter on the main query genuinely excludes
+it before the already-used fallback query ever runs (that fallback
+query has no `expires_at` filter of its own by design -- an
+already-used token is already-used regardless of whether it also
+happens to be expired -- so an expired-but-never-used token correctly
+falls through to the generic message instead).
+
+Confirmed no side effects from the rejected attempt: re-queried the
+row directly -- `used_at` still `NULL` (the rejection happened before
+any write, not after an update that was then rolled back) -- and
+confirmed `admissionscounselor@sirius.app`'s original email still
+logs in normally afterward, completely unaffected.
+
+Cleaned up the test row and Mailpit message afterward.
