@@ -458,6 +458,107 @@ Cleanup: the recipient-validation test applicant, both synthetic
 (non-Mozilla) test subscriptions, and the temporary curl cookie jars
 used for this check were all deleted/removed immediately after.
 
+### 7. A real, previously-undiscovered defect found and fixed: one malformed subscription could silently abort delivery to every other recipient in the same notification
+
+Check 6's own final case established `superadmin@sirius.app` had never
+actually been tested as a real recipient before (only
+`ADMISSIONS_MANAGER`/`FINANCE_MANAGER` had). Subscribing `superadmin`
+with a syntactically-invalid `p256dh`/`auth` (`"sa-p256dh"`/`"sa-auth"`
+-- not valid base64url of any length, a fake test value, not real
+Mozilla keys) and firing a real unassigned-applicant-creation trigger
+surfaced a genuine bug rather than merely confirming the intended
+recipient set:
+
+**What happened.** `pywebpush.webpush()` does not exclusively raise
+`WebPushException` for a failed send -- a malformed key makes its own
+internal `WebPusher.__init__` raise a raw `binascii.Error` *before* any
+HTTP request is even attempted. `_send_sync`'s original
+`except WebPushException` clause did not catch this. The exception
+propagated out of `asyncio.to_thread`, out of the `for` loop in
+`send_push_to_users` (this trigger's unassigned-recipient fan-out has
+more than one recipient), and crashed the entire `BackgroundTasks`
+callback. Because `BackgroundTasks` runs after the triggering
+request's own response has already been sent, the `POST /applicants`
+call itself still returned a real `201` -- the defect was invisible at
+the HTTP layer and only visible by checking whether every intended
+recipient actually got their own real notification.
+
+**Confirmed as a genuine cross-recipient failure, not merely
+`superadmin`'s own delivery failing.** Checked the real Windows
+`Microsoft-Windows-PushNotification-Platform/Operational` event log
+for the several minutes around the triggering request: **no toast
+delivery event of any kind** -- not even the noise-level WNP transport
+keepalive entries that a genuine attempt would produce downstream of a
+successful encryption step. `admissionsmanager@sirius.app`'s
+subscription (a real, working, previously-proven subscription,
+inserted into `push_subscription` before `superadmin`'s in this test)
+never received its own notification either, purely because
+`superadmin`'s malformed row crashed the loop before the iteration
+that would have reached `admissionsmanager` ever ran. One bad
+subscription -- corrupted data, a future client bug, anything not a
+clean base64 string -- would silently drop delivery to every other
+real recipient in the same call, not just the one bad subscription.
+This is a real defect a "does the endpoint return 200" check can never
+surface, since the crash happens entirely after the response is sent.
+
+**Fix -- containment, then prevention.**
+
+1. `api/app/core/push.py`'s `_send_sync` now also catches the bare
+   `Exception` case (not only `WebPushException`), logs it, and
+   returns `None` (no status code, not itself a dead-subscription
+   signal, but contained rather than propagated) -- so one
+   subscription's own failure, of any kind, can never again abort the
+   rest of the batch. This is the actual fix: the loop in
+   `send_push_to_user`/`send_push_to_users` was never given per-
+   iteration isolation, and this is the one place that isolation
+   belongs.
+2. `api/app/schemas/push.py`'s `PushSubscriptionKeys` now validates
+   `p256dh`/`auth` as real base64url (padding-tolerant, so a genuine
+   unpadded browser-issued key is never rejected) at the moment
+   `POST /notifications/subscribe` receives it -- defense in depth, not
+   a substitute for the fix above, so a malformed key is rejected with
+   a real `422` at write time rather than ever reaching a later push
+   attempt at all.
+
+**Re-verified live, not merely re-read.** Rebuilt and redeployed the
+real `api` (and, having discovered along the way that `migrate` caches
+its own separate image independent of `api`'s, the real `migrate`)
+containers. Recreated the identical scenario without touching any of
+the existing rows: fired a fresh unassigned-applicant-creation trigger
+with `superadmin`'s same malformed subscription and
+`admissionsmanager`'s same real one both still present. Result:
+- api container log: `push delivery raised a non-WebPushException
+  error for subscription 9d684bad-...: Invalid base64-encoded string:
+  number of data characters (9) cannot be 1 more than a multiple of 4`
+  -- caught and logged, no traceback, no crash.
+- Real Windows toast (`Id 3153`/`3052`, tracking id `17242`) delivered
+  to Firefox at `18:24:09`, matching the trigger fired at `18:24:08` --
+  `admissionsmanager`'s real notification arrived despite
+  `superadmin`'s malformed subscription being processed in the same
+  batch, immediately before it.
+
+An incidental deployment gap surfaced during this fix and is worth
+recording: `docker compose build api` alone left `sirius-migrate`'s
+own separately-cached image stale (Compose builds each service with
+its own `build:` block into its own tagged image even when both point
+at the same Dockerfile/context), which made `migrate` fail with
+`Can't locate revision identified by '0012_push_subscription'` -- not
+because the migration was wrong, but because the stale `migrate` image
+predated that migration file's own existence in the image. Rebuilding
+`migrate` explicitly (`docker compose build migrate`) resolved it. Any
+future code change needs `docker compose build api migrate` together,
+not `api` alone, for this reason.
+
+Cleanup: the malformed `superadmin` subscription row, both test
+applicants (`Superadmin Recipient Test`,
+`Fix Verification Recipient Test`) and their `application_status_event`
+rows, and the two curl cookie jars used across checks 6 and 7 were all
+deleted, each confirmed by a direct follow-up query/listing returning
+zero rows rather than by assumption. The one leftover host-side/bind-
+mounted temporary script (`_tmp_gen_code4.py`, a TOTP-code helper from
+earlier login testing) was also found and deleted from both the
+container and the host path it was bind-mounted from.
+
 ## Cleanup performed before treating this module as done
 
 - The real test applicant (`Push Test Applicant`) and its
@@ -492,6 +593,13 @@ used for this check were all deleted/removed immediately after.
   attempts, never for broad screen capture or global input
   simulation) were deleted; `git status` confirmed a clean tree before
   each commit.
+- The check-7 malformed `superadmin` subscription row, both its own
+  test applicants and their `application_status_event` rows, its two
+  cookie jars, and the leftover bind-mounted `_tmp_gen_code4.py` helper
+  script (found on both the container's and the host's filesystem)
+  were all deleted, each confirmed by a direct follow-up
+  query/listing, not by assumption -- see check 7 above for the full
+  account.
 
 ## Final checks
 

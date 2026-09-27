@@ -66,6 +66,34 @@ def _send_sync(subscription: PushSubscription, payload_json: str) -> int | None:
     code (so the async caller can decide whether to delete the row),
     or `None` if the send raised for a reason that carries no status
     code at all (a network-level failure, not a push-service response).
+
+    **Catches `Exception`, not only `WebPushException` -- a real defect
+    found and fixed live during this module's own verification.**
+    `pywebpush.webpush()` does not exclusively raise `WebPushException`
+    for a failed send: a `PushSubscription` row with a malformed
+    (non-base64) `p256dh`/`auth` value -- confirmed live to happen for
+    a row created directly via `POST /notifications/subscribe` with a
+    syntactically-invalid key, not merely a hypothetical -- makes
+    `pywebpush`'s own internal `WebPusher.__init__` raise a raw
+    `binascii.Error` *before* it ever reaches the HTTP layer that would
+    produce a `WebPushException`. The original narrower
+    `except WebPushException` left that exception type completely
+    unhandled: it propagated out of this function, out of the
+    `asyncio.to_thread` call, out of the `for` loop in
+    `send_push_to_user`/`send_push_to_users` below (neither of which
+    wrapped each iteration individually), and crashed the entire
+    `BackgroundTasks` callback -- silently dropping delivery to every
+    *other*, perfectly valid recipient still left in that same batch.
+    Confirmed live: a genuine `ADMISSIONS_MANAGER` recipient with a
+    real, working subscription received **no notification at all**
+    for an applicant-creation event, solely because a different,
+    unrelated recipient earlier in the same call happened to have a
+    malformed key. Catching the broader `Exception` here, and treating
+    any such failure as equivalent to `None` (no status code, not
+    itself a `404`/`410` dead-subscription signal, but reported and
+    contained rather than left to propagate) fixes this at its actual
+    source -- the one place a single subscription's own failure mode is
+    supposed to be isolated from every other subscription's delivery.
     """
     try:
         response = webpush(
@@ -91,6 +119,20 @@ def _send_sync(subscription: PushSubscription, payload_json: str) -> int | None:
             status_code,
         )
         return status_code
+    except Exception as exc:
+        # Anything else -- a malformed key raising binascii.Error deep
+        # inside pywebpush's own encryption setup before any HTTP
+        # request is even made is the concrete case that surfaced this,
+        # but this is deliberately the broad catch-all: no single
+        # subscription's own failure, of any kind, may be allowed to
+        # abort delivery to the rest of the batch. See this function's
+        # own docstring for the full account of the real bug this closes.
+        logger.warning(
+            "push delivery raised a non-WebPushException error for subscription %s: %s",
+            subscription.id,
+            exc,
+        )
+        return None
 
 
 async def send_push_to_user(
