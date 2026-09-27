@@ -319,3 +319,54 @@ export interface ReconciliationResponse {
   cycles: ReconciliationCycle[];
   totals: ReconciliationTotals;
 }
+
+/** Mirrors `api/app/schemas/auth.py::ChangePasswordRequest` exactly
+ * (Module 15) -- deliberately has no user-id field, since
+ * `POST /auth/change-password` sources the target account solely from
+ * the session cookie.
+ */
+export interface ChangePasswordRequest {
+  current_password: string;
+  new_password: string;
+}
+
+/** Mirrors `api/app/schemas/users.py::UserSummary` exactly (Module 15)
+ * -- one row of `GET /users`, and the shape `POST /users`/
+ * `PATCH /users/{id}`/`POST /users/{id}/reset-totp` all return.
+ * Deliberately has no `password_hash`/`totp_secret_encrypted` field --
+ * the backend response never carries either.
+ */
+export interface UserSummary {
+  id: string;
+  email: string;
+  full_name: string;
+  role_code: RoleCode;
+  is_active: boolean;
+  totp_enabled: boolean;
+  last_login_at: string | null;
+  created_at: string;
+}
+
+export interface UserListResponse {
+  items: UserSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** Mirrors `api/app/schemas/users.py::UserCreateRequest` exactly. */
+export interface UserCreateRequest {
+  email: string;
+  full_name: string;
+  password: string;
+  role_code: RoleCode;
+}
+
+/** Mirrors `api/app/schemas/users.py::UserUpdateRequest` exactly -- both
+ * fields optional, `undefined`/omitted means "leave alone" on the wire
+ * the same way the backend's own `None`-default does.
+ */
+export interface UserUpdateRequest {
+  role_code?: RoleCode;
+  is_active?: boolean;
+}

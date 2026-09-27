@@ -127,3 +127,28 @@ export const DASHBOARD_APPLICANTS_ROLES: RoleCode[] = [
 ];
 
 export const DASHBOARD_FINANCE_ROLES: RoleCode[] = FINANCE_ROLES;
+
+/** `app.routers.users`'s own `require_role_session(RoleCode.SUPER_ADMIN)`
+ * allowlist, copied verbatim (Module 15) -- `GET /users`/`POST /users`/
+ * `PATCH /users/{id}`/`POST /users/{id}/reset-totp` all gate on exactly
+ * this one role, with no asymmetry between them the way payment-claim
+ * submit/resolve or import upload/history have. Used both for the Users
+ * nav link and for `RequireAuth`-style route gating on `/users` itself.
+ */
+export const USERS_ROLES: RoleCode[] = ["SUPER_ADMIN"];
+
+/** Mirrors `api/app/models/enums.MANDATORY_TOTP_ROLES` exactly -- the
+ * three roles TOTP enrollment is mandatory for. `UsersPage` uses this to
+ * decide which rows get a "Reset TOTP" action at all: resetting TOTP for
+ * a role that was never required to enroll in the first place is a
+ * meaningless action the backend would still technically accept
+ * (`POST /users/{id}/reset-totp` has no role-specific guard of its own),
+ * but offering it in the UI for e.g. an `ADMISSIONS_COUNSELOR` would be
+ * inviting an action with no real effect on that account's own login
+ * flow.
+ */
+export const MANDATORY_TOTP_ROLES: RoleCode[] = [
+  "SUPER_ADMIN",
+  "FINANCE_STAFF",
+  "FINANCE_MANAGER",
+];

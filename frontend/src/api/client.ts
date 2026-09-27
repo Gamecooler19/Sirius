@@ -83,6 +83,8 @@ export const api = {
   get: <T>(path: string) => request<T>(path, { method: "GET" }),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "POST", body: body !== undefined ? JSON.stringify(body) : undefined }),
+  patch: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: "PATCH", body: body !== undefined ? JSON.stringify(body) : undefined }),
   /** For multipart/form-data uploads (e.g. `POST /import/applicants`) --
    * distinct from `post` because the body is a `FormData` instance passed
    * through as-is, never `JSON.stringify`'d, and never given an explicit

@@ -34,7 +34,7 @@ from sqlalchemy import select
 from app.core.cookies import clear_session_cookie, set_session_cookie
 from app.core.crypto import decrypt_totp_secret, encrypt_totp_secret
 from app.core.db import get_db
-from app.core.deps import get_client_ip, get_current_session
+from app.core.deps import get_client_ip, get_current_session, get_current_user
 from app.core.security import (
     hash_backup_code,
     hash_password,
@@ -48,6 +48,7 @@ from app.models.enums import MANDATORY_TOTP_ROLES, RoleCode
 from app.models.role import Role
 from app.models.user import User, UserBackupCode
 from app.schemas.auth import (
+    ChangePasswordRequest,
     LoginRequest,
     LoginResponse,
     MeResponse,
@@ -236,6 +237,49 @@ async def totp_verify_backup_code(
     session_id = request.cookies.get("sirius_session")
     if session_id:
         await mark_totp_verified(session_id)
+
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    body: ChangePasswordRequest,
+    session: SessionData = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Self-service password change (Module 15). Depends on
+    `get_current_user`, not `get_current_session` -- unlike `/me`, this is
+    a genuine mutation of a security-sensitive credential, so it requires
+    a fully authenticated session (mandatory TOTP already verified for a
+    role that requires it), not merely a TOTP-pending one.
+
+    **Identity is sourced exclusively from the session, never the request
+    body** -- there is no `user_id` field on `ChangePasswordRequest` at
+    all (see that schema's own docstring), the same "trust the session"
+    rule `submitted_by` on payment claims already established. This
+    endpoint can only ever change the calling session's own password.
+
+    **Current-password verification reuses `verify_password` -- the exact
+    same Argon2id path `/auth/login` uses** (`app.core.security`), not a
+    second, independently-written comparison. A wrong current password is
+    rejected with the real, specific error text ("current password is
+    incorrect"), not the generic "invalid email or password" `/auth/login`
+    uses for its own, different reason (avoiding a user-enumeration
+    timing/response-shape oracle on an *unauthenticated* endpoint) --
+    that reasoning does not apply here, since the caller is already a
+    verified, authenticated session and already knows their own email;
+    withholding *which* field was wrong on an authenticated self-service
+    action would only be user-hostile, not a real security improvement.
+    """
+    user_id = uuid.UUID(session.user_id)
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "account not found")
+
+    if not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "current password is incorrect")
+
+    user.password_hash = hash_password(body.new_password)
+    await db.flush()
 
 
 @router.get("/me", response_model=MeResponse)

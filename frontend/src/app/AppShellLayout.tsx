@@ -34,6 +34,8 @@ import {
   UploadSimple,
   ClockCounterClockwise,
   ChartLine,
+  UserCircle,
+  GearSix,
 } from "@phosphor-icons/react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useMe } from "../api/useMe";
@@ -44,6 +46,7 @@ import {
   IMPORT_HISTORY_ROLES,
   IMPORT_UPLOAD_ROLES,
   RECONCILIATION_ROLES,
+  USERS_ROLES,
   hasRole,
 } from "../auth/roles";
 
@@ -185,6 +188,24 @@ export function AppShellLayout() {
             leftSection={<ClockCounterClockwise size={18} weight="light" />}
           />
         )}
+
+        {hasRole(me.role_code, USERS_ROLES) && (
+          <NavLink
+            component={Link}
+            to="/users"
+            label="Users"
+            active={path === "/users"}
+            leftSection={<GearSix size={18} weight="light" />}
+          />
+        )}
+
+        <NavLink
+          component={Link}
+          to="/profile"
+          label="Profile"
+          active={path === "/profile"}
+          leftSection={<UserCircle size={18} weight="light" />}
+        />
       </AppShell.Navbar>
 
       <AppShell.Main>

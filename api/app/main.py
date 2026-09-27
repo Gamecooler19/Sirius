@@ -13,6 +13,7 @@ from app.routers import (
     payment_claim,
     reconciliation,
     status,
+    users,
 )
 
 settings = get_settings()
@@ -35,6 +36,7 @@ app.include_router(payment_claim.router)
 app.include_router(applicants_read.router)
 app.include_router(import_batches_read.router)
 app.include_router(reconciliation.router)
+app.include_router(users.router)
 
 
 @app.get("/healthz")

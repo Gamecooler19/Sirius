@@ -46,3 +46,19 @@ class MeResponse(BaseModel):
     full_name: str
     role_code: str
     totp_enabled: bool
+
+
+class ChangePasswordRequest(BaseModel):
+    """`POST /auth/change-password` (Module 15). No user id field --
+    `app.routers.auth.change_password` sources the target account
+    exclusively from the authenticated session itself, the same
+    "trust the session, never the body" rule already established for
+    `submitted_by` on payment claims (`app.schemas.payment_claim`'s own
+    docstring). A change-password request that carried its own user id
+    would let any authenticated session change any other account's
+    password merely by naming its id in the body -- there is no
+    legitimate reason for this field to ever exist here.
+    """
+
+    current_password: str
+    new_password: str
