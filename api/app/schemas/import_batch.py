@@ -1,11 +1,11 @@
 """Request/response schemas for the Excel-import endpoint."""
 
 import uuid
-from datetime import datetime
 
 from pydantic import BaseModel
 
 from app.models.enums import ImportBatchStatus
+from app.schemas._datetime import UtcDatetime
 
 
 class ImportBatchResponse(BaseModel):
@@ -18,5 +18,5 @@ class ImportBatchResponse(BaseModel):
     rejected_count: int
     flagged_rows: list[dict] | None
     error_detail: str | None
-    completed_at: datetime | None
+    completed_at: UtcDatetime | None
     deduplicated: bool = False

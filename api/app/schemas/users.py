@@ -12,11 +12,11 @@ on the wire without a matching, deliberate addition here.
 """
 
 import uuid
-from datetime import datetime
 
 from pydantic import BaseModel, EmailStr
 
 from app.models.enums import RoleCode
+from app.schemas._datetime import UtcDatetime
 
 
 class UserSummary(BaseModel):
@@ -32,9 +32,9 @@ class UserSummary(BaseModel):
     role_code: str
     is_active: bool
     totp_enabled: bool
-    last_login_at: datetime | None
-    activated_at: datetime | None
-    created_at: datetime
+    last_login_at: UtcDatetime | None
+    activated_at: UtcDatetime | None
+    created_at: UtcDatetime
 
 
 class UserListResponse(BaseModel):

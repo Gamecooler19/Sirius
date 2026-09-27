@@ -13,12 +13,12 @@ applied here for consistency and to keep that guarantee ORM-model-agnostic.
 """
 
 import uuid
-from datetime import datetime
 from decimal import Decimal
 
 from pydantic import BaseModel
 
 from app.models.enums import ApplicationStatus, PaymentClaimStatus, PaymentMode
+from app.schemas._datetime import UtcDatetime
 
 
 class ApplicantSummary(BaseModel):
@@ -32,8 +32,8 @@ class ApplicantSummary(BaseModel):
     intake_cycle: str
     current_status: ApplicationStatus
     assigned_counselor_id: uuid.UUID | None
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
 
 
 class ApplicantListResponse(BaseModel):
@@ -60,7 +60,7 @@ class StatusHistoryEvent(BaseModel):
     to_status: ApplicationStatus
     changed_by: uuid.UUID | None
     note: str | None
-    created_at: datetime
+    created_at: UtcDatetime
 
 
 class StatusHistoryResponse(BaseModel):
@@ -76,9 +76,9 @@ class PaymentClaimDetail(BaseModel):
     reference_number: str | None
     submitted_by: uuid.UUID
     confirmed_by: uuid.UUID | None
-    confirmed_at: datetime | None
+    confirmed_at: UtcDatetime | None
     note: str | None
-    created_at: datetime
+    created_at: UtcDatetime
 
 
 class ApplicantFinanceResponse(BaseModel):
@@ -108,8 +108,8 @@ class ImportBatchSummary(BaseModel):
     rejected_count: int
     error_detail: str | None
     imported_by: uuid.UUID
-    created_at: datetime
-    completed_at: datetime | None
+    created_at: UtcDatetime
+    completed_at: UtcDatetime | None
 
 
 class ImportBatchListResponse(BaseModel):

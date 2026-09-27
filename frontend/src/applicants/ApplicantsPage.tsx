@@ -8,6 +8,7 @@
  */
 
 import { useState } from "react";
+import type { CSSProperties } from "react";
 import {
   Alert,
   Badge,
@@ -36,6 +37,34 @@ import { EmptyState } from "../components/EmptyState";
 import { APPLICANTS_ROLES, hasRole } from "../auth/roles";
 
 const PAGE_SIZE = 10;
+
+/** Module 21 audit finding, fixed here: before this fix, a `Table.Td`
+ * had no width limit or overflow handling of any kind, so an
+ * applicant with a pathologically long `full_name` (confirmed live:
+ * a genuine 10,000-character value, which the backend accepted with
+ * no length limit at the time -- see `app.schemas.applicant_create`'s
+ * own docstring for the paired backend fix) rendered as one
+ * enormous, unbroken line of text that overflowed its cell and pushed
+ * every later column off-screen, breaking the table's layout for
+ * every row on the page, not just the offending one. `maxWidth` +
+ * `overflow: hidden` + `textOverflow: ellipsis` + `whiteSpace: nowrap`
+ * is the standard CSS single-line-truncation idiom: the cell always
+ * stays within its column's own width no matter how long the
+ * underlying value is, and `title` (a real, native browser tooltip)
+ * surfaces the full value on hover so truncation never actually loses
+ * information, only its default on-screen presentation. Applied to
+ * `full_name`/`email`/`program`/`intake_cycle` -- every free-text
+ * column this table renders -- not only `full_name`, since `program`/
+ * `intake_cycle` share the identical unbounded-length backend pattern
+ * (see this module's own report for why only `full_name`'s backend
+ * schema was tightened in this pass, not every field).
+ */
+const TRUNCATED_CELL_STYLE: CSSProperties = {
+  maxWidth: 240,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
 
 const STATUS_COLORS: Record<ApplicationStatus, string> = {
   IMPORTED: "gray",
@@ -258,10 +287,18 @@ export function ApplicantsPage() {
                   onClick={() => setSelectedId(applicant.id)}
                   style={{ cursor: "pointer" }}
                 >
-                  <Table.Td>{applicant.full_name}</Table.Td>
-                  <Table.Td>{applicant.email}</Table.Td>
-                  <Table.Td>{applicant.program}</Table.Td>
-                  <Table.Td>{applicant.intake_cycle}</Table.Td>
+                  <Table.Td style={TRUNCATED_CELL_STYLE} title={applicant.full_name}>
+                    {applicant.full_name}
+                  </Table.Td>
+                  <Table.Td style={TRUNCATED_CELL_STYLE} title={applicant.email}>
+                    {applicant.email}
+                  </Table.Td>
+                  <Table.Td style={TRUNCATED_CELL_STYLE} title={applicant.program}>
+                    {applicant.program}
+                  </Table.Td>
+                  <Table.Td style={TRUNCATED_CELL_STYLE} title={applicant.intake_cycle}>
+                    {applicant.intake_cycle}
+                  </Table.Td>
                   <Table.Td>
                     <Badge color={STATUS_COLORS[applicant.current_status]} variant="light">
                       {applicant.current_status}

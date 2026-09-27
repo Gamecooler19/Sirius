@@ -1,11 +1,11 @@
 """Request/response schemas for the status-transition endpoint."""
 
 import uuid
-from datetime import datetime
 
 from pydantic import BaseModel
 
 from app.models.enums import ApplicationStatus
+from app.schemas._datetime import UtcDatetime
 
 
 class StatusTransitionRequest(BaseModel):
@@ -18,4 +18,4 @@ class StatusTransitionResponse(BaseModel):
     from_status: ApplicationStatus
     to_status: ApplicationStatus
     changed_by: uuid.UUID
-    created_at: datetime
+    created_at: UtcDatetime
