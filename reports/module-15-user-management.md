@@ -231,3 +231,179 @@ All temporary cookie jars (`_admin_cookies.txt`, `_fs2_cookies.txt`,
 from the host repository before committing. No TOTP secret or backup
 code appears in this report or anywhere else committed -- every raw
 secret generated this module was printed to chat only.
+
+## Follow-up verification
+
+Two real gaps in this module's own original verification, closed against
+the same live stack and the same seed data already sitting in it -- no new
+fixtures. Both checks confirmed real, previously-untested behavior;
+the second one required an actual code change, not just a check.
+
+### 1. Cross-user role change: TOTP boundary crossing and mid-session effect
+
+The original verification never PATCHed a *different* account's
+`role_code` across the mandatory-TOTP boundary (only the self-lockout
+guard, which specifically blocks a SUPER_ADMIN from doing this to their
+own account, was exercised). Three real questions were open: what a
+still-enrolled account's next login does after losing mandatory-TOTP
+status, what a never-enrolled account's next login does after gaining
+it, and whether a role change is visible to an account's *already open*
+session or only after a fresh login. All three were checked directly
+against the running stack, not assumed.
+
+**Direction 1 -- already-enrolled mandatory-TOTP account demoted to a
+non-mandatory role.** As SUPER_ADMIN, `PATCH /users/{id}` on
+`financestaff@sirius.app` (`FINANCE_STAFF`, `totp_enabled: true`) changed
+`role_code` to `ADMISSIONS_COUNSELOR`. A **fresh** `POST /auth/login` for
+this account immediately afterward returned:
+
+```json
+{"user_id": "...", "role_code": "ADMISSIONS_COUNSELOR", "totp_required": false, "totp_enrollment_required": false}
+```
+
+`totp_required: false` -- **the session skips TOTP verification entirely
+and is fully usable on its very first request** (`GET /applicants` and
+`GET /auth/me` both returned real `200`s with no `/auth/totp/verify` step
+in between), even though `user.totp_enabled` was still `true` in the
+database the whole time. This confirms `POST /auth/login`'s own design
+(`app.routers.auth`'s own docstring: role membership in
+`MANDATORY_TOTP_ROLES` decides `totp_verified_initial`, not whether a
+secret happens to already exist) actually behaves this way live, not just
+in the docstring's own stated intent -- **the role decides, the enrolled
+secret does not**, and both are defensible designs but only this one is
+what the code does. The account was reverted back to `FINANCE_STAFF`
+afterward and its normal TOTP-required login re-confirmed.
+
+**Direction 2 -- never-enrolled non-mandatory account promoted to a
+mandatory-TOTP role.** As SUPER_ADMIN, `PATCH /users/{id}` on
+`admissionsmanager@sirius.app` (`ADMISSIONS_MANAGER`, never enrolled,
+`totp_enabled: false`) changed `role_code` to `FINANCE_MANAGER`. A fresh
+login returned:
+
+```json
+{"user_id": "...", "role_code": "FINANCE_MANAGER", "totp_required": true, "totp_enrollment_required": true}
+```
+
+`totp_enrollment_required: true` -- correctly routes to real enrollment
+(not `/auth/totp/verify`, which would 400 against a non-existent secret).
+Confirmed the resulting TOTP-pending session cannot reach a protected
+route (`GET /finance/payment-claims` -> real `401`, `"two-factor
+verification required"`) until enrollment completes. Reverted the
+account's role back afterward.
+
+**Mid-session effect -- checked directly, not assumed.** Before the
+Direction-1 role change, a genuine, already fully-authenticated
+`financestaff@sirius.app` session (password + live TOTP code, the same
+way a real user would be mid-session) was established and confirmed
+working (`GET /finance/payment-claims` -> real `200` with real payment
+claim rows). The SUPER_ADMIN PATCH was then issued *without* touching
+this session's cookie. Re-querying the same still-open session
+immediately afterward:
+
+```
+GET /auth/me   -> 200, role_code: "FINANCE_STAFF"  (stale -- DB now says ADMISSIONS_COUNSELOR)
+GET /finance/payment-claims -> 200, same real rows (stale -- this route should now be off-limits)
+```
+
+**A role change does not take effect on an already-open session's very
+next request. It requires a fresh login.** The reason is structural, not
+a bug in this module's own new code: `require_role`/`require_role_session`
+(`app.core.deps`, unchanged by Module 15) check `session.role_code`,
+which is read straight out of the Valkey-cached session payload written
+at login time -- never re-derived from the database per request the way
+`get_scoped_session` explicitly does for `is_active` (that function's own
+docstring: "checks `is_active` fresh... an account an administrator just
+deactivated must lose access on its very next request, not after its
+session naturally expires"). `role_code` was never given that same
+fresh-per-request treatment. This is a real, previously undocumented
+asymmetry: deactivating a user takes effect immediately (already verified
+in this module's original report), but changing a user's *role* does not,
+until that session's own natural end (12-hour idle timeout) or a fresh
+login. Documented here as a genuine, disclosed limitation of the current
+design -- not fixed in this follow-up, since fixing it (either a
+per-request DB role check, matching `is_active`'s own treatment, or a
+role-change force-logout comparable to the reset-TOTP fix below) is a
+real design decision with its own tradeoffs and was not the ask; flagging
+it precisely, with live evidence, is.
+
+### 2. `POST /users/{id}/reset-totp` now also force-logs-out any active session
+
+**Decision: in scope, and implemented.** The endpoint's own stated
+purpose is the lost/stolen-device case. Leaving a device's already-live,
+already-TOTP-verified session running after an admin has decided they no
+longer trust that device's second factor is not a defensible "out of
+scope for a course project" gap -- it is the literal scenario the
+endpoint exists to close, left half-closed. This is different in kind
+from the mid-session role-change asymmetry documented above (a genuine
+design tradeoff with real costs on both sides); here, the gap has no
+comparable upside.
+
+**What was built.** `app.core.sessions` gained a secondary Valkey index,
+`user_sessions:{user_id}` (a Set of session ids), maintained by
+`create_session` (adds on login) and `destroy_session` (removes on
+logout) with the same `SESSION_TTL_SECONDS` expiry as the session keys
+themselves. `destroy_sessions_for_user(user_id)` reads that index and
+deletes every session key it names, then the index itself. `POST
+/users/{id}/reset-totp` calls this after clearing the TOTP secret --
+one additional line in the route, no new endpoint, no new request/response
+shape.
+
+**Live verification (real Docker stack, real Valkey, real force-rebuilt
+`api` container -- this codebase has no live-reload; a `docker compose
+build api && up -d api` was required for the change to actually take
+effect, confirmed by checking `destroy_sessions_for_user` was present on
+the running container's loaded module before trusting any result).**
+
+1. A genuine, fully-authenticated `financestaff@sirius.app` session was
+   established (fresh login, live TOTP verify) and confirmed working:
+   `GET /auth/me` -> real `200`.
+2. As SUPER_ADMIN, `POST /users/{id}/reset-totp` was called against this
+   same account while that session was still open.
+3. The **same** session cookie, re-queried immediately afterward:
+
+   ```
+   GET /auth/me -> 401, {"detail": "session expired or invalid"}
+   ```
+
+   Genuinely logged out -- not merely `totp_enabled` flipping in a
+   response body, the actual Valkey session key was deleted (`valkey-cli
+   EXISTS user_sessions:<financestaff's-id>` -> `0` immediately after,
+   confirming both the session key and its index entry were removed, not
+   just one).
+4. **Scoped correctly to only the target account**: the SUPER_ADMIN's own
+   separate, unrelated session was re-checked in the same window (`GET
+   /users` -> real `200`, unaffected) -- the force-logout does not touch
+   any session besides the one belonging to the user being reset.
+5. **No regression on ordinary logout**: a fresh `auditor@sirius.app`
+   session's `user_sessions:{id}` index key was confirmed present after
+   login, then confirmed deleted (`EXISTS` -> `0`) after a normal `POST
+   /auth/logout` -- `destroy_session`'s own index cleanup (added
+   alongside the reset-TOTP force-logout path) works on the ordinary
+   logout path too, not only the new admin-triggered one.
+
+**Accepted tradeoff, stated plainly.** A device the admin did not intend
+to also sign out (the legitimate user, already re-enrolling on a new
+phone, who happens to still have a browser tab open elsewhere) also gets
+logged out by this change. This is deliberate: a lost/stolen device
+serious enough to warrant an admin-triggered TOTP reset should not leave
+any of that account's sessions assumed safe by default. The full
+reasoning is in `reset_totp`'s own docstring in
+`api/app/routers/users.py`.
+
+**Incident during this verification, disclosed.** While setting up the
+mid-session role-change test above, an `enroll/start` call was issued
+against the SUPER_ADMIN operator session by mistake (copy-paste error
+while switching between test accounts), which cleared that account's own
+real TOTP secret mid-session. Caught immediately by the next `GET /users`
+response showing `superadmin@sirius.app`'s own `totp_enabled: false`; the
+account was re-enrolled with a fresh secret (`enroll/start` +
+`enroll/confirm`, both real `200`/`204`) within the same few seconds,
+before it was used for anything else, and confirmed fully restored
+(`totp_enabled: true`, session still valid, `GET /users` still `200`)
+before continuing. No lasting effect; disclosed here rather than omitted,
+per this project's own verification standard.
+
+All accounts were confirmed back in their pre-verification state
+(`role_code`, `is_active`, `totp_enabled`) before this follow-up was
+considered done. All temporary cookie jars and TOTP-code generator
+scripts used during this follow-up were deleted before committing.

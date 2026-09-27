@@ -55,6 +55,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import require_role_session
 from app.core.security import hash_password
+from app.core.sessions import destroy_sessions_for_user
 from app.models.enums import RoleCode
 from app.models.role import Role
 from app.models.user import User
@@ -247,6 +248,30 @@ async def reset_totp(
     enrollment flow (`/auth/totp/enroll/start` + `/confirm`) exactly as
     if this were the account's very first login -- not the
     `/auth/totp/verify` flow a still-enrolled account would hit.
+
+    **Also force-logs-out any currently active session for this account
+    (Module 15 follow-up).** The threat model this endpoint exists for is
+    a lost or stolen device -- if that device (or whoever now holds it)
+    also still has a live, already-TOTP-verified browser session open,
+    clearing the *database* secret alone would not touch that session at
+    all: `require_role_session` and `get_current_user` only ever read
+    `role_code`/`totp_verified` out of the Valkey session payload, never
+    re-check `user.totp_enabled` per request, so a session that was
+    already fully authenticated before the reset would keep working,
+    completely undisturbed, until it expired on its own (up to the full
+    12-hour `SESSION_TTL_SECONDS`) or the user logged out voluntarily.
+    For an endpoint whose entire reason to exist is "I no longer trust
+    this account's second factor," leaving a live, already-past-that-
+    factor session running is the exact gap the endpoint claims to
+    close. `destroy_sessions_for_user` (`app.core.sessions`) deletes
+    every Valkey session this user currently has open via the
+    `user_sessions:{user_id}` index `create_session` maintains -- a
+    real, if rare, false-positive cost is a device the admin did *not*
+    intend to also sign out (the legitimate user, re-logging in on a
+    new phone, who is simultaneously still signed in on a laptop) also
+    getting logged out; accepted deliberately, since a lost/stolen
+    device serious enough to need a TOTP reset should not leave any
+    session assumed safe by default.
     """
     _, db = user_and_db
 
@@ -262,5 +287,7 @@ async def reset_totp(
     user.totp_enabled = False
     await db.flush()
     await db.refresh(user)
+
+    await destroy_sessions_for_user(user.id)
 
     return _to_summary(user, role_code)
