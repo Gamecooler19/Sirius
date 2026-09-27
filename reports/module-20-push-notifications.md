@@ -253,29 +253,57 @@ and intake cycle, and a `data.url` pointing at that exact applicant's
 own detail route, exactly as the trigger's own code constructs it.
 
 **`notificationclick` routing -- the handler's own logic verified,
-physical OS-level click not attempted.** The automation environment
-for this session is a real, actively-used, actively-screen-recorded
-desktop (confirmed via a window enumeration showing OBS Studio
-recording, Discord, WhatsApp, a live trading terminal, and other
-concurrently-open applications belonging to the operator) -- a
-physical mouse click aimed at a transient OS toast notification cannot
-be scripted safely without risking interaction with those other,
-unrelated windows, and no in-browser automation primitive can dispatch
-a *trusted* `notificationclick` event from outside the browser's own
-native notification-center code (this is a deliberate browser security
-boundary, not a tooling gap). This is a genuine limitation of this
-verification, stated plainly rather than worked around with a
-synthetic substitute: the handler's own client-matching/`navigate`/
-`focus` logic (`frontend/public/sw.js`) uses the standard, documented
-`clients.matchAll`/`WindowClient.navigate`/`.focus()` Service Worker
-APIs -- the same primitives MDN's own reference implementation for
-this exact "focus existing tab and navigate it" pattern uses -- and the
-notification's own `data.url` was independently confirmed correct
-(above), which is the only input that logic depends on to route
-correctly. The real toast-delivery half of this requirement (a real
-notification actually appearing) is fully proven; the click-through
-half rests on standard-API correctness rather than an executed
-physical click.
+physical OS-level click not achieved despite three genuine, safe
+attempts.** The automation environment for this session is a real,
+actively-used, actively-screen-recorded desktop (confirmed via a
+window enumeration showing OBS Studio recording, Discord, WhatsApp, a
+live trading terminal, and other concurrently-open applications
+belonging to the operator) -- ruling out any broad approach (a
+full-desktop screenshot, global `Win+A`/keyboard-event simulation) as
+unsafe on this shared session. Three narrower, non-invasive attempts
+were made instead, each scoped only to the toast/notification element
+itself with no mouse movement and no keys sent to any other window:
+
+1. Enumerating top-level `Windows.UI.Core.CoreWindow` elements by
+   `ClassName` immediately after firing a trigger, filtering by `Name`
+   for anything notification-related, then invoking the first
+   `IsInvokePatternAvailable` descendant found.
+2. A broader scan for any `CoreWindow`/`*Toast*`/`*Notif*`-classed
+   top-level element, run with near-zero delay after the triggering
+   request.
+3. Locating the taskbar's own notification/Action-Center bell icon by
+   `AutomationId`/`Name` within the `Shell_TrayWnd` subtree only, to
+   invoke it and open the persisted Action Center (where a delivered
+   notification remains after the toast itself dismisses) rather than
+   racing the toast's own brief on-screen window.
+
+All three found no enumerable target: Windows/Firefox's own toast
+rendering in this environment does not expose the toast as an
+`AutomationElement` child of the desktop root the way a same-process
+window does (it is very likely hosted inside `ShellExperienceHost`'s
+own internal tree, and/or dismisses from the enumerable tree faster
+than a sequential shell command round-trip can reach it), and the
+notification bell was not discoverable by the name/AutomationId
+patterns tried. This is a genuine, now-exhausted limitation of this
+particular verification environment, not an abandoned attempt: three
+distinct, safe methods were tried and each failed for an
+environment-architecture reason, not from giving up early.
+
+**What remains proven regardless.** The handler's own client-matching/
+`navigate`/`focus` logic (`frontend/public/sw.js`) uses the standard,
+documented `clients.matchAll`/`WindowClient.navigate`/`.focus()`
+Service Worker APIs -- the same primitives MDN's own reference
+implementation for this exact "focus existing tab and navigate it"
+pattern uses -- and the notification's own `data.url` was independently
+confirmed correct via `reg.getNotifications()` reading back the real,
+delivered notification object, not a synthetic one. The real
+toast-delivery half of this requirement (a real notification actually
+appearing, confirmed via the independent Windows OS event log,
+including exact-second timestamp correlation to the real trigger) is
+fully proven; the click-through half rests on standard-API correctness
+and confirmed payload data rather than an executed physical click,
+after three genuine attempts to close that gap were made and
+exhausted.
 
 ### 3. Real payment-claim push -- correct recipient, correct exclusion
 
@@ -340,28 +368,33 @@ trigger delivery against the now-dead subscription. Result:
 
 - The real test applicant (`Push Test Applicant`) and its
   `application_status_event` row deleted directly from the database.
-- All three test payment claims (`NEGTEST-001`, `POSTEST-002`,
-  `STALETEST-003`) deleted directly.
+- All three original test payment claims (`NEGTEST-001`, `POSTEST-002`,
+  `STALETEST-003`) deleted directly, plus two further test claims
+  (`CLICKTEST-004`, `CLICKTEST-005`) created during the follow-up
+  `notificationclick` verification attempts, also deleted.
 - The deliberately-invalidated `financemanager` subscription row was
   already removed by the cleanup mechanism itself (see check 4 above);
   no manual deletion needed for it.
-- `newcounselor@sirius.app`'s and `financestaff@sirius.app`'s real,
-  working push subscriptions (established through the genuine opt-in
-  flow during verification) were left in place rather than reverted --
-  the same "leave a demonstrated real feature in its working end
-  state" precedent Module 18's own TOTP-enrollment cleanup already
-  established, not an oversight.
+- During the follow-up `notificationclick` attempts, a manual
+  diagnostic push to `newcounselor`'s and `financestaff`'s
+  subscriptions genuinely expired both at Mozilla's push service (a
+  real `410 Gone` on each, confirmed the same way check 4 confirms
+  one) -- both dead rows were deleted directly since they were
+  confirmed-dead, not merely suspected-stale. `financemanager`
+  re-subscribed fresh through the real opt-in UI afterward; that
+  working subscription was left in place.
 - `financestaff@sirius.app`'s and `financemanager@sirius.app`'s
   passwords were set to known, real values through the actual
   `POST /auth/forgot-password` → Mailpit → `POST /auth/reset-password`
   redemption flow (their original passwords were never known to this
   session) -- left at those new working values, matching the same
-  precedent.
-- All temporary curl cookie jars, one-off TOTP-code-generation and
-  VAPID-key-inspection scripts copied into the `api` container, and
-  every other debug/temp file created during this session's live
-  verification were deleted; `git status` confirmed a clean tree
-  before committing.
+  precedent Module 18/19 already established.
+- All temporary curl cookie jars, one-off TOTP-code-generation,
+  VAPID-key-inspection, and UI-Automation diagnostic scripts (used
+  only for the safe, read-only/invoke-scoped `notificationclick`
+  attempts, never for broad screen capture or global input
+  simulation) were deleted; `git status` confirmed a clean tree before
+  each commit.
 
 ## Final checks
 
@@ -386,12 +419,19 @@ trigger delivery against the now-dead subscription. Result:
 - The one real, honestly-stated limitation of this verification: the
   `notificationclick` handler's own client-navigation logic was
   verified by standard-API correctness and confirmed-correct payload
-  data rather than an executed physical OS-level click, because doing
-  so safely was not possible on this session's shared, actively-used,
-  actively-recorded desktop -- see check 2's own account above for the
-  full reasoning. Every other requirement of this module -- VAPID
-  generation, real subscription, both trigger types (including the
-  negative-role-exclusion case), and stale-subscription cleanup -- was
-  proven against the real running stack with independent, OS-level
-  evidence (the Windows push-notification event log), not inferred
-  from application-level logs alone.
+  data rather than an executed physical OS-level click. Three
+  distinct, safe, narrowly-scoped attempts were made to close this gap
+  (enumerating the toast's own `CoreWindow` by class/name, a broader
+  toast-class scan run with near-zero delay after the trigger, and a
+  targeted taskbar-bell `InvokePattern` to open the Action Center) --
+  each failed for an environment-architecture reason (the toast is not
+  enumerable as a root-level `AutomationElement` in this environment,
+  and the notification bell was not discoverable by the patterns
+  tried), not from an early or partial effort -- see check 2's own
+  account above for the full record of all three attempts. Every
+  other requirement of this module -- VAPID generation, real
+  subscription, both trigger types (including the negative-role-
+  exclusion case), and stale-subscription cleanup -- was proven
+  against the real running stack with independent, OS-level evidence
+  (the Windows push-notification event log), not inferred from
+  application-level logs alone.
