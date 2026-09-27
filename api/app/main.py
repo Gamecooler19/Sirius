@@ -11,6 +11,7 @@ from app.routers import (
     auth,
     import_,
     import_batches_read,
+    notifications,
     payment_claim,
     reconciliation,
     status,
@@ -39,6 +40,7 @@ app.include_router(applicants_read.router)
 app.include_router(import_batches_read.router)
 app.include_router(reconciliation.router)
 app.include_router(users.router)
+app.include_router(notifications.router)
 
 
 @app.get("/healthz")

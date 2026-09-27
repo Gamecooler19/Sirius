@@ -10,6 +10,7 @@ from app.models.finance_record import FinanceRecord
 from app.models.import_batch import ImportBatch
 from app.models.password_reset_token import PasswordResetToken
 from app.models.payment_claim import PaymentClaim
+from app.models.push_subscription import PushSubscription
 from app.models.role import Role
 from app.models.user import User, UserBackupCode
 
@@ -22,6 +23,7 @@ __all__ = [
     "ImportBatch",
     "PasswordResetToken",
     "PaymentClaim",
+    "PushSubscription",
     "Role",
     "User",
     "UserBackupCode",

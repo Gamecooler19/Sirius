@@ -25,6 +25,9 @@ dependencies = [
   # directly by application code, but FastAPI raises at request time
   # without it installed.
   "python-multipart>=0.0.12,<0.1",
+  # Module 20: real signed Web Push (RFC 8291/8292) delivery -- the
+  # standard library for this, wraps VAPID signing + payload encryption.
+  "pywebpush>=2.0,<3.0",
 ]
 
 [dependency-groups]

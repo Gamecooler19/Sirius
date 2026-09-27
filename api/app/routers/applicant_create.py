@@ -145,17 +145,43 @@ UUID belongs to an already-known contact, and this is the exact
 system-wide integrity guarantee ("rather than silently creating a
 duplicate the rest of the system would then treat as two unrelated
 people") this module was asked to build.
+
+**Module 20: push-notifies the applicant's own assigned counselor, or
+`ADMISSIONS_MANAGER`/`SUPER_ADMIN` if left unassigned -- the exact same
+visibility split `applicant`'s own RLS policy already enforces, never
+a role invented for this notification alone.** An `ADMISSIONS_COUNSELOR`
+assigned to a new applicant is, by that same RLS policy, the *only*
+counselor who can ever `GET` that applicant again -- notifying exactly
+that one counselor and no one else mirrors read visibility exactly, not
+a broader "notify every counselor" convenience that would tell a
+counselor about an applicant they can't even open. An unassigned
+applicant is visible to every `SUPER_ADMIN`/`ADMISSIONS_MANAGER`/
+`FINANCE_STAFF`/`FINANCE_MANAGER`/`AUDITOR` per that same policy, but
+only `SUPER_ADMIN`/`ADMISSIONS_MANAGER` are notified -- the two roles
+with an actual role in the admissions pipeline (the same reasoning this
+router's own `_CREATE_ROLES` already applies: finance/audit roles can
+*see* applicant data for reconciliation, per ADR-03, but have no
+legitimate reason to act on a fresh, unassigned inquiry the way a
+manager deciding who should pick it up does). Delivery runs via
+`BackgroundTasks` (`app.core.push.notify_in_background`), scheduled
+*after* the real `201` response and its own database write have
+already succeeded -- a push-delivery failure (a dead subscription, a
+transient push-service outage) must never turn a successful applicant
+creation into a failed request; see `app.core.push`'s own docstring for
+why `BackgroundTasks`, not a task queue, is this project's correct
+choice for this.
 """
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import open_scoped_session
 from app.core.deps import require_role_session
+from app.core.push import get_active_user_ids_for_roles, notify_in_background
 from app.models.applicant import Applicant
 from app.models.application_status_event import ApplicationStatusEvent
 from app.models.enums import ApplicationStatus, RoleCode
@@ -238,6 +264,7 @@ async def list_assignable_counselors(
 @router.post("", response_model=ApplicantDetail, status_code=status.HTTP_201_CREATED)
 async def create_applicant(
     body: ApplicantCreateRequest,
+    background_tasks: BackgroundTasks,
     user_and_db: tuple[User, AsyncSession] = Depends(require_role_session(*_CREATE_ROLES)),
 ) -> ApplicantDetail:
     user, db = user_and_db
@@ -345,5 +372,25 @@ async def create_applicant(
     db.add(event)
     await db.flush()
     await db.refresh(applicant)
+
+    # --- Module 20: push-notify, scheduled after the real write above
+    # has already succeeded -- see module docstring for the full
+    # reasoning on why the recipient set mirrors applicant's own RLS
+    # visibility split exactly, and why BackgroundTasks (not a task
+    # queue) is the correct delivery mechanism here. ---
+    if assigned_counselor_id is not None:
+        notify_recipient_ids = [assigned_counselor_id]
+    else:
+        notify_recipient_ids = await get_active_user_ids_for_roles(
+            db, [RoleCode.SUPER_ADMIN.value, RoleCode.ADMISSIONS_MANAGER.value]
+        )
+
+    background_tasks.add_task(
+        notify_in_background,
+        notify_recipient_ids,
+        "New applicant",
+        f"{applicant.full_name} was just added ({applicant.program}, {applicant.intake_cycle}).",
+        f"/applicants?open={applicant.id}",
+    )
 
     return _to_detail(applicant)

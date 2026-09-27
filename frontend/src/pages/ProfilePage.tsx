@@ -54,10 +54,11 @@ import {
   Title,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
-import { CheckCircle, Clock, Copy, ShieldCheck, WarningCircle } from "@phosphor-icons/react";
+import { Bell, BellSlash, CheckCircle, Clock, Copy, ShieldCheck, WarningCircle } from "@phosphor-icons/react";
 import { QRCodeSVG } from "qrcode.react";
 import { ApiError } from "../api/client";
 import { useMe } from "../api/useMe";
+import { useNotificationSubscription } from "../api/useNotifications";
 import {
   useChangeEmail,
   useChangeName,
@@ -81,6 +82,7 @@ export function ProfilePage() {
   const enrollStart = useTotpEnrollStart();
   const enrollConfirm = useTotpEnrollConfirm();
   const totpSelfReset = useTotpSelfReset();
+  const notifications = useNotificationSubscription();
 
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -491,6 +493,61 @@ export function ProfilePage() {
               fullWidth
             >
               Confirm enrollment
+            </Button>
+          </Stack>
+        )}
+      </Stack>
+
+      <Stack gap="sm">
+        <Title order={4}>Push notifications</Title>
+
+        {notifications.error && (
+          <Alert color="red" icon={<WarningCircle size={20} weight="light" />}>
+            {notifications.error}
+          </Alert>
+        )}
+
+        {notifications.state === "unsupported" && (
+          <Text size="sm" c="dimmed">
+            This browser does not support push notifications.
+          </Text>
+        )}
+
+        {notifications.state === "unsubscribed" && (
+          <Stack gap="sm">
+            <Text size="sm" c="dimmed">
+              Get a real browser notification for events relevant to your
+              role -- a new applicant assigned to you, or a payment claim
+              awaiting your confirmation. Off by default; nothing is sent
+              until you turn this on.
+            </Text>
+            <Button
+              leftSection={<Bell size={16} weight="light" />}
+              loading={notifications.busy}
+              onClick={() => void notifications.subscribe()}
+              w={280}
+            >
+              Enable notifications
+            </Button>
+          </Stack>
+        )}
+
+        {notifications.state === "subscribed" && (
+          <Stack gap="sm">
+            <Group gap={6}>
+              <Badge color="green" variant="light" leftSection={<Bell size={12} weight="light" />}>
+                Enabled on this device
+              </Badge>
+            </Group>
+            <Button
+              variant="light"
+              color="red"
+              leftSection={<BellSlash size={16} weight="light" />}
+              loading={notifications.busy}
+              onClick={() => void notifications.unsubscribe()}
+              w={280}
+            >
+              Disable notifications
             </Button>
           </Stack>
         )}

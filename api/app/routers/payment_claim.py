@@ -54,15 +54,40 @@ by the database on the same `UPDATE`, without this router importing or
 touching `finance_record` at all -- the same pattern
 `app.routers.status` already established for the `finance_record`
 auto-create trigger.
+
+**Module 20: `POST /finance/payment-claims` push-notifies
+`FINANCE_MANAGER`/`SUPER_ADMIN` specifically, never `FINANCE_STAFF` --
+matching `PAYMENT_RESOLVE_ROLES` (`frontend/src/auth/roles.ts`)
+exactly, the same maker-checker asymmetry this router's own
+`confirm_payment_claim`/`reject_payment_claim` role gate already
+enforces.** A `FINANCE_STAFF` member can submit a claim but can never
+resolve *any* claim, including their own -- notifying them of a new
+`PENDING` claim would be telling them about an action they have no
+next step for; the two roles that can actually act on it
+(`FINANCE_MANAGER`/`SUPER_ADMIN`) are the only two notified. This is a
+role-set notification (not a single-recipient one, unlike Module 19's
+own assigned-counselor case): `payment_claim`'s own RLS policy grants
+every `FINANCE_STAFF`/`FINANCE_MANAGER`/`SUPER_ADMIN`/`AUDITOR` full
+read visibility with no per-row narrowing at all (`0003_rls.py`'s own
+`_ROLE_ONLY_POLICIES` entry for this table), so unlike applicant
+assignment there is no individual "owner" to notify -- every
+`FINANCE_MANAGER`/`SUPER_ADMIN` account is an equally valid resolver,
+so every one of them is notified, the same "notify everyone who can
+act, not merely one arbitrarily chosen person" shape a real maker-
+checker queue needs. Delivery runs via `BackgroundTasks`, scheduled
+after the real submit response has already succeeded, for the identical
+reasoning `app.routers.applicant_create`'s own Module 20 section
+already gives.
 """
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import require_role_session
+from app.core.push import get_active_user_ids_for_roles, notify_in_background
 from app.models.enums import PaymentClaimStatus, RoleCode
 from app.models.finance_record import FinanceRecord
 from app.models.payment_claim import PaymentClaim
@@ -179,6 +204,7 @@ async def list_payment_claims(
 @router.post("", response_model=PaymentClaimResponse)
 async def submit_payment_claim(
     body: PaymentClaimSubmitRequest,
+    background_tasks: BackgroundTasks,
     user_and_db: tuple[User, AsyncSession] = Depends(
         require_role_session(RoleCode.SUPER_ADMIN, RoleCode.FINANCE_STAFF, RoleCode.FINANCE_MANAGER)
     ),
@@ -203,6 +229,20 @@ async def submit_payment_claim(
     db.add(claim)
     await db.flush()
     await db.refresh(claim)
+
+    # Module 20: notify every FINANCE_MANAGER/SUPER_ADMIN -- matching
+    # PAYMENT_RESOLVE_ROLES exactly, never FINANCE_STAFF; see module
+    # docstring for the full reasoning.
+    resolver_ids = await get_active_user_ids_for_roles(
+        db, [RoleCode.SUPER_ADMIN.value, RoleCode.FINANCE_MANAGER.value]
+    )
+    background_tasks.add_task(
+        notify_in_background,
+        resolver_ids,
+        "New payment claim",
+        f"A {body.payment_mode.value} claim for {body.amount} is awaiting confirmation.",
+        "/finance",
+    )
 
     return _to_response(claim)
 

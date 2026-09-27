@@ -158,6 +158,16 @@ services:
       TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY}
       ENVIRONMENT: ${ENVIRONMENT}
       LOG_LEVEL: ${LOG_LEVEL}
+      # Module 20: Settings() is instantiated at import time by
+      # alembic/env.py itself (to read DATABASE_DIRECT_URL), so the
+      # migrate service needs every required Settings field to exist,
+      # not only the ones this specific migration run happens to touch
+      # -- confirmed live during this module's own stack verification:
+      # omitting these here failed `migrate` at container startup with
+      # a real pydantic ValidationError before a single migration ran.
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
+      VAPID_SUBJECT: ${VAPID_SUBJECT}
     command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres:
@@ -196,6 +206,12 @@ services:
       SMTP_PORT: "1025"
       SMTP_FROM_ADDRESS: no-reply@sirius.app
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://127.0.0.1:5173}
+      # Module 20: real Web Push VAPID signing keys -- see
+      # deploy/.env.example's own generation command; never a hardcoded
+      # or example value in a real deployment.
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
+      VAPID_SUBJECT: ${VAPID_SUBJECT}
     ports:
       - "127.0.0.1:38210:38210"
     depends_on:

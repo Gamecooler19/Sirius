@@ -69,6 +69,19 @@ class Settings(BaseSettings):
     # frontend dev server's own published address, not this API's own.
     FRONTEND_BASE_URL: str = "http://127.0.0.1:5173"
 
+    # Module 20: real Web Push (RFC 8292 VAPID) signing keys. Generated
+    # once per deployment (see `deploy/.env.example`'s own generation
+    # command), never committed -- the private key signs every outbound
+    # push, and a leaked one lets an attacker impersonate this server to
+    # any push service that has ever seen the matching public key.
+    # `VAPID_SUBJECT` is the "who to contact about this traffic" claim
+    # every push service requires (RFC 8292's own `sub` claim) -- a
+    # `mailto:` URI, the same convention `pywebpush`'s own documentation
+    # and every real deployment guide uses, not a made-up format.
+    VAPID_PRIVATE_KEY: str
+    VAPID_PUBLIC_KEY: str
+    VAPID_SUBJECT: str = "mailto:no-reply@sirius.app"
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]

@@ -489,3 +489,33 @@ export interface UserUpdateRequest {
   role_code?: RoleCode;
   is_active?: boolean;
 }
+
+/** Mirrors `api/app/schemas/push.py::VapidPublicKeyResponse` exactly
+ * (Module 20) -- `GET /notifications/vapid-public-key`, unauthenticated.
+ */
+export interface VapidPublicKeyResponse {
+  public_key: string;
+}
+
+/** Mirrors `api/app/schemas/push.py::PushSubscribeRequest`/
+ * `PushSubscriptionKeys` exactly (Module 20). Sent verbatim from the
+ * real browser `PushSubscription.toJSON()` object
+ * (`pushSubscription.endpoint`, `.keys.p256dh`, `.keys.auth`) -- no
+ * reshaping on the frontend side, matching the backend schema's own
+ * "mirror the browser API's own shape" decision.
+ */
+export interface PushSubscribeRequest {
+  endpoint: string;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+}
+
+/** Mirrors `api/app/schemas/push.py::PushUnsubscribeRequest` exactly
+ * (Module 20).
+ */
+export interface PushUnsubscribeRequest {
+  endpoint: string;
+}
+
