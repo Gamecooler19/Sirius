@@ -326,6 +326,99 @@ screenshot, not a rendering bug in this module's own code. The same
 class of tooling quirk Module 17/18 already documented for this
 project's own browser-automation checks, not a new one.)
 
+## Follow-up verification
+
+Two gaps identified after the module's own original verification pass
+-- both closed against the real running stack, not inferred from
+reading the code a second time.
+
+### 1. `assigned_counselor_id`'s two distinct rejection messages, both confirmed live and genuinely distinct
+
+The module's own design-decision section claims a manager/admin caller
+sending an invalid `assigned_counselor_id` gets a real, specific
+rejection -- but the original live verification only ever exercised a
+*nonexistent* id (`00000000-0000-0000-0000-000000000000`), not a real
+account of the wrong role or a real, existing-but-deactivated
+counselor. Both were missing live proof.
+
+**Wrong role, real existing account.** Logged in as
+`admissionsmanager@sirius.app`, sent `assigned_counselor_id` equal to
+`auditor@sirius.app`'s real id (`1aadd2f4-86b1-4511-9564-9559b3d118d8`,
+a genuine `AUDITOR` account, not a counselor at all) -> real `422`,
+
+```
+{"detail": "assigned_counselor_id must be an existing ADMISSIONS_COUNSELOR account"}
+```
+
+**Existing but deactivated `ADMISSIONS_COUNSELOR`.** No deactivated
+counselor account existed in the live database at the time of this
+check, so one was created for real: logged in as `superadmin@sirius.app`
+(real password + real live-generated TOTP code), called the real
+`PATCH /users/{id}` to set `newcounselor@sirius.app`'s
+`is_active=false` -- confirmed `200`, `is_active: false` in the
+response. With that account genuinely deactivated, sent
+`assigned_counselor_id` equal to its id from the manager session ->
+real `422`, a **distinct** message:
+
+```
+{"detail": "assigned_counselor_id refers to a deactivated account"}
+```
+
+**Result: the code genuinely produces two distinct strings, exactly as
+the design-decision section promises** -- "not a real counselor at
+all" and "a real counselor, but deactivated" are not folded into one
+generic message; the report's own design-decision section already
+matched what the code does, and this follow-up is what supplies the
+live proof that was previously missing rather than a correction.
+`newcounselor@sirius.app` was reactivated immediately afterward via a
+second real `PATCH` (`is_active=true`, confirmed `200`) and its
+`is_active` state was independently re-confirmed via direct `psql`
+after cleanup -- no lasting side effect on this shared test account.
+
+### 2. Email-fallback duplicate detection, no phone, across the same RLS boundary the phone-path proof already covered
+
+The module's own original verification proved phone-based duplicate
+detection catches a collision even across an RLS visibility boundary
+(check 4 in the original report), but never exercised the
+*email*-fallback path (`normalized_phone is None` -> falls through to
+the email check) at all, with or without an RLS boundary.
+
+**Seed applicant.** Created as `admissionsmanager@sirius.app`:
+`full_name="Email Fallback Seed"`, `email="email.fallback.seed@example.com"`,
+`phone="9998887799"`, left unassigned -> real `201`,
+id `65b8593e-7f28-40f5-b24a-bd71b31c3ed1`.
+
+**Collision attempt, no phone, email only (different case, to also
+prove `normalize_email`'s own lowercasing).** Logged in as
+`newcounselor@sirius.app` (a counselor with no assignment to, and
+therefore no RLS visibility into, the unassigned seed applicant above
+-- confirmed separately below). Sent `full_name="Email Duplicate
+Attempt"`, `email="Email.Fallback.Seed@example.com"` (mixed case),
+no `phone` field at all -> real `409`:
+
+```
+{"detail": "an applicant with this email already exists (applicant_id=65b8593e-7f28-40f5-b24a-bd71b31c3ed1)"}
+```
+
+The real conflicting id matches the seed applicant exactly, and the
+case-insensitive match confirms `normalize_email`'s lowercasing is
+genuinely wired into this path, not only the phone path.
+
+**Confirmed this crosses the same RLS boundary the phone-path proof
+already established.** `GET /applicants/65b8593e-...` as
+`newcounselor@sirius.app` -> real `404` ("applicant not found") --
+this counselor genuinely cannot see the seed applicant through the
+ordinary read endpoint (it is unassigned, and this role's own RLS
+policy only grants visibility into rows assigned to itself), yet the
+email-fallback duplicate check still found and named it. This is the
+same dedicated-full-visibility-scope fix documented in the module's
+own "Duplicate detection" section doing its job on the email path, not
+only the phone path it was originally proven against.
+
+**Cleanup.** The seed applicant and its status-history event were
+deleted directly from the database afterward; confirmed via a
+follow-up `SELECT` that no rows from either check remain.
+
 ## Cleanup performed before treating this module as done
 
 - All 4 test applicants created during verification (`Walkin Test
