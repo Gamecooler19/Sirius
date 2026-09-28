@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from openpyxl import load_workbook
 
+from app.core.field_limits import MAX_FIELD_LENGTH as _MAX_FIELD_LENGTH
 from app.services.import_config import COLUMN_MAP
 
 
@@ -83,6 +84,30 @@ def parse_workbook(file_bytes: bytes) -> tuple[list[ParsedRow], list[str]]:
     string here rather than rejecting the row outright -- module scope
     does not specify these as reject-worthy, only `full_name`/`email` are
     treated as the load-bearing identity fields for matching.
+
+    **A field exceeding `_MAX_FIELD_LENGTH` (255) is rejected the same
+    way -- a real defect found and fixed live during this module's own
+    follow-up verification, not a hypothetical.** `POST /applicants`
+    (`app.schemas.applicant_create.ApplicantCreateRequest`) already
+    bounds `full_name`/`program`/`intake_cycle`/`phone` to 255
+    characters at the Pydantic layer, but this import path never goes
+    through that schema at all -- it builds `Applicant(...)` ORM
+    objects directly from this function's own `ParsedRow` dataclass,
+    parsed straight out of the spreadsheet, so the schema fix protected
+    exactly one of this application's two applicant-creation paths.
+    Confirmed live: a real `.xlsx` with a genuine 5,000-character
+    `Full Name` cell, uploaded through the real
+    `POST /import/applicants`, was accepted with `created_count: 3,
+    rejected_count: 0` and landed in the database in full (`SELECT
+    length(full_name)` returned exactly `5000`) -- completely
+    unguarded, exactly the same failure mode the manual-entry path
+    already had before its own fix, on a path that fix never touched.
+    Rejecting the row here, at parse time, mirrors this function's own
+    existing missing-`full_name`/`email` handling exactly -- one bad
+    row does not abort an otherwise-good import of hundreds of rows,
+    and the caller gets a real, specific reason (naming the row number
+    and which field) in `error_detail`/`rejected_count`, not a silent
+    truncation or an opaque database error surfacing as a 500.
     """
     workbook = load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
     sheet = workbook.active
@@ -128,14 +153,36 @@ def parse_workbook(file_bytes: bytes) -> tuple[list[ParsedRow], list[str]]:
             )
             continue
 
+        phone = cell("phone")
+        program = cell("program") or ""
+        intake_cycle = cell("intake_cycle") or ""
+
+        oversized_fields = [
+            field_name
+            for field_name, value in (
+                ("full_name", full_name),
+                ("email", email),
+                ("phone", phone),
+                ("program", program),
+                ("intake_cycle", intake_cycle),
+            )
+            if value is not None and len(value) > _MAX_FIELD_LENGTH
+        ]
+        if oversized_fields:
+            rejected.append(
+                f"row {row_number}: field(s) exceed {_MAX_FIELD_LENGTH} characters "
+                f"({', '.join(oversized_fields)})"
+            )
+            continue
+
         parsed.append(
             ParsedRow(
                 row_number=row_number,
                 full_name=full_name,
                 email=email,
-                phone=cell("phone"),
-                program=cell("program") or "",
-                intake_cycle=cell("intake_cycle") or "",
+                phone=phone,
+                program=program,
+                intake_cycle=intake_cycle,
             )
         )
 

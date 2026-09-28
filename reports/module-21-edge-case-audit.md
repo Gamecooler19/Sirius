@@ -522,6 +522,211 @@ own timezone.
   to the single field this check happened to observe first.
 - `tsc --noEmit` (frontend, unchanged by this fix) still clean.
 
+## Follow-up verification
+
+Three gaps in this module's own prior verification, identified after
+re-reading the report against what had actually been tested rather
+than what was claimed. All three surfaced real, previously-unfixed
+defects, not merely confirmed existing correctness -- consistent with
+this session's own established pattern (the Module 20 exception-
+handling defect, the reconciliation-at-volume self-correction above)
+that a "verification" claim not backed by the exact evidence it
+implies is a real gap worth closing, not a rounding error.
+
+### Follow-up 1: the long-string fix never protected the Excel-import path
+
+Section 3.1 above fixed `POST /applicants` (`ApplicantCreateRequest`)
+with `max_length=255`, and its own docstring claimed this was
+sufficient because every other applicant-creation path, including
+Excel import, "ultimately funnels through the same `applicant` table
+that this schema alone directly guards on the write side." That claim
+was never actually tested against the import path -- and it was
+false.
+
+**Reproduced live.** A real `.xlsx` was built with three rows: two
+ordinary applicants and one with a genuine 5,000-character `Full Name`
+cell. Uploaded through the real `POST /import/applicants` (as
+`superadmin@sirius.app`, a real TOTP-verified session): the response
+was `{"created_count": 3, "rejected_count": 0}` -- the oversized row
+was accepted with no rejection at all, and a direct DB read confirmed
+it landed in the database in full (`SELECT length(full_name)` returned
+exactly `5000`). `app.routers.import_.import_applicants` never
+instantiates `ApplicantCreateRequest`; it builds `Applicant` ORM rows
+directly from `app.services.excel_import.ParsedRow`, a plain
+dataclass parsed straight out of the spreadsheet, completely bypassing
+the schema the original fix relied on.
+
+**Fixed, matching this codebase's own existing bad-row-rejection
+pattern exactly, not a new convention.**
+`app.services.excel_import.parse_workbook` already rejects a row with
+a blank `full_name`/`email` individually -- one bad row does not abort
+an otherwise-good import of hundreds of rows, and the caller gets a
+real, specific reason in `error_detail`, counted under
+`rejected_count`. An oversized field (`full_name`, `email`, `phone`,
+`program`, or `intake_cycle` exceeding 255 characters) is now rejected
+the identical way. A shared `app.core.field_limits.MAX_FIELD_LENGTH`
+constant (255) is the single source of truth both
+`ApplicantCreateRequest` and `parse_workbook` read from, so the two
+application-layer bounds cannot silently drift apart from each other.
+
+**Database-level `CHECK` constraint added as the defense-in-depth
+backstop** (migration `0014_applicant_field_length`,
+`ck_applicant_{full_name,email,phone,program,intake_cycle}_length`),
+the same "an application-layer check alone is one omitted call path
+away from being wrong" reasoning this project already applies to the
+maker-checker and positive-amount constraints -- covering not just
+these two application paths but any future or direct-SQL write
+neither of them ever sees. **Verified no existing row violated it
+before adding it**, the same "restore the corrupted row first"
+precedent the negative-amount fix already established: the one
+violating row (this follow-up's own reproduction) was deleted first;
+`SELECT ... WHERE length(full_name) > 255 OR ...` confirmed zero
+violations immediately before the migration ran.
+
+**Re-verified live, all three layers independently:**
+- The identical `.xlsx` re-uploaded against the rebuilt api: real
+  `{"created_count": 2, "rejected_count": 1, "error_detail": "row 3:
+  field(s) exceed 255 characters (full_name)"}` -- the two good rows
+  created, the oversized row rejected individually with a real,
+  specific reason, exactly mirroring the existing missing-field
+  handling. A direct DB read confirmed the oversized row was never
+  stored (`0` matching rows).
+- A raw SQL `INSERT` (`app.actor_role='SUPER_ADMIN'`, bypassing both
+  `ApplicantCreateRequest` and `parse_workbook` entirely) with a
+  300-character `full_name`: rejected by the real database with
+  `ERROR: new row for relation "applicant" violates check constraint
+  "ck_applicant_full_name_length"`. A second raw insert with a
+  legitimate short name succeeded normally -- no false-positive
+  rejection.
+- `app.schemas.applicant_create.ApplicantCreateRequest`'s own
+  docstring corrected to state plainly that this schema only ever
+  guarded its own endpoint, not every write path -- the false claim
+  is preserved in the docstring's own text (marked as the original,
+  incorrect claim) alongside the correction, not silently deleted.
+
+All test applicants/import-batch rows from this follow-up were
+deleted afterward; confirmed via direct queries returning
+`applicants: 12`, `import_batches: 1` -- the exact pre-existing
+baseline.
+
+### Follow-up 2: payment-claim amount had no decimal-precision or magnitude bound
+
+Section 3.2 above fixed `amount <= 0`; the amount field's own decimal
+precision and magnitude, relative to its real column type
+(`numeric(12, 2)`), had never been tested at all.
+
+**Reproduced live, two distinct failure modes:**
+1. **Silent rounding.** `POST /finance/payment-claims` with
+   `amount: 100.005` (three decimal places) returned a real `200` with
+   `"amount": "100.01"` -- not `100.005` echoed back, not a rejection,
+   a silently different value than what was sent. A direct DB read
+   confirmed `100.01` was genuinely stored, not a JSON-serialization
+   artifact.
+2. **A genuine unhandled `500`.** `amount: 99999999999.99` (13
+   significant digits -- exceeding `numeric(12, 2)`'s own true
+   capacity, confirmed by recomputing the column's real maximum,
+   `9999999999.99`, 12 digits total) and `amount: 1e30` both produced
+   a real `500 Internal Server Error`. The api container's own logs
+   showed the actual cause: an unhandled
+   `asyncpg.exceptions.NumericValueOutOfRangeError: numeric field
+   overflow`, propagating all the way to the client as an opaque
+   `"Internal Server Error"` -- exactly the "an opaque database error
+   surfacing as a 500" failure mode this project's own established
+   convention says a business-logic rejection must never be, and the
+   same class of defect `app.routers.payment_claim`'s own maker-
+   checker guard already exists to prevent for a *different* rejection
+   reason. Confirmed the crashed transaction left no partial state
+   (`finance_record.total_paid` unaffected by Postgres's own rollback).
+
+**Fixed:** `PaymentClaimSubmitRequest.amount` is now
+`Field(gt=0, max_digits=12, decimal_places=2)` -- matching
+`payment_claim.amount`'s own real column precision and scale exactly,
+not an arbitrarily chosen bound.
+
+**Re-verified live, all three cases:**
+- `amount: 100.005`: real `422`,
+  `{"type": "decimal_max_places", "msg": "Decimal input should have no
+  more than 2 decimal places"}`.
+- `amount: 99999999999.99`: real `422`,
+  `{"type": "decimal_max_digits", "msg": "Decimal input should have no
+  more than 12 digits in total"}` -- no more `500`.
+- `amount: 1e30`: identical real `422`, same reason.
+- **No false-positive rejection**: the column's own true maximum,
+  `amount: 9999999999.99` (10 nines plus `.99`, exactly 12 significant
+  digits), was submitted and correctly accepted with a real `200`.
+
+Both test claims (the pre-fix `100.005`/`100.01` row and the post-fix
+`9999999999.99` row) were deleted afterward -- neither was ever
+confirmed, so `finance_record.total_paid` required no reversal;
+confirmed via direct query returning `payment_claim` count `3`, the
+exact pre-existing baseline.
+
+### Follow-up 3: a programmatic sweep for `UtcDatetime`, and a second real screen
+
+Section 5.2 above fixed the UTC-timestamp-serialization defect and
+spot-checked two schema files and one screen (`FinancePage`) by
+inspection. Neither check was exhaustive by construction -- a spot
+check proves the fields it happens to look at, not the ones it
+doesn't.
+
+**Programmatic sweep, not another manual spot check.** A small
+AST-based script parsed every `.py` file under `api/app/schemas/`,
+resolved each file's own `datetime`/`UtcDatetime` import aliases, and
+flagged any class field whose type annotation references a bare
+`datetime` name without also referencing `UtcDatetime` (covering
+`datetime`, `datetime | None`, and any other structural position the
+annotation might place it in). **Self-tested against a deliberately
+broken sample file first** (`bad_field: datetime`,
+`optional_bad: datetime | None`) to confirm the detector actually
+fires rather than silently passing everything -- it correctly flagged
+both fields. Run for real against `api/app/schemas/`: **zero
+findings** across all 10 schema files. Cross-checked with a plain
+grep for the literal string `datetime` across every schema file: every
+occurrence is either the `UtcDatetime` import itself, internal to
+`app/schemas/_datetime.py`'s own implementation (the definition of
+`UtcDatetime`, not a consuming field), or docstring prose -- no schema
+file has an unfixed bare-`datetime` field remaining.
+
+**A second real screen, not only `FinancePage`.** A real status
+transition was fired (`APPLIED -> IN_PROCESS` on a real seeded
+applicant, `Asha Rao`) at a wall-clock time captured immediately
+before the call via the host's own clock (`06:50:39 IST`, `+05:30`).
+The applicant's own status-history timeline
+(`ApplicantDetailDrawer`, a different component from `FinancePage`,
+reading a different endpoint, `GET /applicants/{id}/status-history`)
+was opened in the real, live browser: it displayed
+**`28/9/2026, 6:50:42 am`** for that exact transition -- matching the
+real wall-clock reading (a few hundred milliseconds later, consistent
+with real network/processing latency, not a timezone discrepancy).
+The transition's own note (`"Timezone verification test transition"`)
+was also correctly displayed, confirming the right event was being
+read. This closes the same class of gap Module 20's own Excel-import-
+trigger follow-up already established this session -- a fix "spot
+checked" on one path is not yet verified on every path it claims to
+cover.
+
+The test status-transition event was deleted and the applicant's
+`current_status` restored to its original `APPLIED` value afterward;
+confirmed via direct query.
+
+### Cleanup for this follow-up
+
+All test applicants/import batches/payment claims/status-events
+created across the three follow-ups above were deleted; confirmed via
+direct queries returning `applicants: 12`, `import_batches: 1`,
+`payment_claim: 3`, `sum(total_paid): 550000.00` -- the exact same
+pre-existing baseline this module's own original cleanup already
+established, unchanged by this follow-up round. All temporary Python
+helper scripts, `.xlsx` test files, SQL scripts, and curl cookie jars
+(both on the host and every `docker cp`'d copy inside the `api`/
+`postgres` containers) were deleted; `git status` confirmed a clean
+tree (only this follow-up's own five real fix files: two new files,
+`api/alembic/versions/0014_applicant_field_length.py` and
+`api/app/core/field_limits.py`; three modified,
+`api/app/schemas/applicant_create.py`,
+`api/app/schemas/payment_claim.py`,
+`api/app/services/excel_import.py`) before committing.
+
 ## Cleanup performed before treating this module as done
 
 - All 300 seeded `ScaleTest Applicant N` rows and their
@@ -612,3 +817,6 @@ own timezone.
 | Frontend: unhandled render exception | **Fixed** | Real error boundary added; live screenshot before/after; recovery button tested working |
 | Precision: fractional paisa | No defect | Exact `numeric(12,2)` arithmetic confirmed end to end, including live UI rendering |
 | Precision: UTC vs. browser timestamp | **Fixed (systemic)** | Real 5.5-hour IST display error confirmed and reproduced; `UtcDatetime` fix applied across every response schema; re-verified live with a real host-clock-correlated timestamp |
+| Follow-up 1: long-string fix on the Excel-import path | **Fixed (severe gap)** | Original fix never covered import; reproduced live (5,000-char name imported uncontrolled), fixed at parse-time + DB `CHECK`, re-verified at all 3 layers including a raw-SQL bypass test |
+| Follow-up 2: payment amount decimal precision/magnitude | **Fixed (2 defects: silent rounding + real 500)** | `100.005` silently became `100.01`; `99999999999.99`/`1e30` both crashed with a real unhandled `500`; fixed with `max_digits=12, decimal_places=2`, re-verified live including the true column-max boundary |
+| Follow-up 3: programmatic `UtcDatetime` sweep + 2nd screen | No further defect found | AST-based sweep (self-tested against a broken sample) found zero remaining bare-`datetime` fields; status-history timeline independently confirmed matching a real wall-clock reading |
