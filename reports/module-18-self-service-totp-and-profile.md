@@ -317,7 +317,7 @@ new one.
   via a real `forgot-password`/`reset-password` cycle (its original
   value was never known to this session) so a real SUPER_ADMIN login
   could be exercised for the `UsersPage` cross-check; left at the new
-  working value (`Module18TestPass!`) rather than reverted, since the
+  working value (`[REDACTED-Module22]`) rather than reverted, since the
   original was never available to revert to. `superadmin`'s TOTP
   enrollment was restored to its correct, working state after the
   accidental disable described above.
@@ -364,7 +364,7 @@ syntactically valid six-digit placeholder):
 
 ```
 POST /auth/totp/self-reset
-{"current_password": "AdmissionsManager123!", "current_totp_code": "123456"}
+{"current_password": "[REDACTED-Module22]", "current_totp_code": "123456"}
 ```
 
 **Real result**: `400`, body `{"detail": "TOTP is not currently

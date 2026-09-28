@@ -58,7 +58,43 @@ settings = get_settings()
 # Codes a push service uses to mean "this subscription's endpoint is
 # permanently gone" -- RFC 8030 SS7's own documented behavior, and the
 # module's own explicit requirement for when to delete the row.
+#
+# **`401` is also, in one specific documented case, a permanent-deletion
+# signal -- a real defect found and fixed live during a Module 22
+# VAPID-key-rotation drill, not merely a theoretical addition.** RFC 8030
+# itself only documents 404/410 as "gone"; a real key rotation was
+# performed live (the original Module 20 key had been accidentally
+# committed in plaintext and needed revoking) and the real, pre-existing
+# subscription's own next push attempt did **not** get a `410` as this
+# module's own original design assumed -- it got a real `401
+# Unauthorized` from Mozilla's autopush service, with a body confirming
+# `{"errno": 109, "error": "Unauthorized", "message": "VAPID public key
+# mismatch"}`. This is Mozilla's own documented autopush error code 109
+# (https://autopush.readthedocs.io/en/latest/http.html#error-codes) --
+# a browser subscription is bound to the specific VAPID public key
+# (`applicationServerKey`) it was created under; once that key is
+# rotated, no future push signed by the new private key can ever
+# succeed against that subscription again, permanently, not merely a
+# transient auth hiccup a retry could fix. Confirmed live: the
+# pre-existing row was **not** deleted by the original 404/410-only
+# check, meaning a real key rotation would otherwise leave every old
+# subscription silently, permanently broken with no cleanup path at
+# all -- the exact "found a real gap in the earlier design, not just
+# confirmed it" pattern this whole project's own verification discipline
+# already established for every other module.
 _DEAD_SUBSCRIPTION_STATUS_CODES = frozenset({404, 410})
+
+# Mozilla autopush's own documented errno for "the sender's VAPID public
+# key does not match the key this subscription was created under" --
+# see this constant's own usage in `_send_sync` for why a 401 carrying
+# this specific errno is treated as an equally permanent deletion
+# signal, not merely logged and left in place. Deliberately narrow
+# (checked against the response body's own `errno` field, not the
+# generic 401 status alone) so a different, potentially transient
+# 401 reason from some other push service is never silently deleted on
+# the strength of a single, service-specific error code that happens
+# to share the same HTTP status.
+_VAPID_MISMATCH_ERRNO = 109
 
 
 def _send_sync(subscription: PushSubscription, payload_json: str) -> int | None:
@@ -118,6 +154,21 @@ def _send_sync(subscription: PushSubscription, payload_json: str) -> int | None:
             exc.message,
             status_code,
         )
+        # A 401 alone is not treated as dead-subscription evidence (an
+        # ordinary auth hiccup could in principle be transient) -- but a
+        # 401 carrying autopush's own documented errno 109 specifically
+        # means the subscription is permanently unusable under any future
+        # key, confirmed live during this module's own VAPID-rotation
+        # drill (see `_DEAD_SUBSCRIPTION_STATUS_CODES`'s own docstring
+        # for the full account). Read narrowly from the real response
+        # body, not inferred from the status code alone.
+        if status_code == 401 and exc.response is not None:
+            try:
+                body = exc.response.json()
+            except ValueError:
+                body = {}
+            if body.get("errno") == _VAPID_MISMATCH_ERRNO:
+                return 410  # normalize to the existing dead-subscription signal
         return status_code
     except Exception as exc:
         # Anything else -- a malformed key raising binascii.Error deep

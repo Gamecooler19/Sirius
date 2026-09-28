@@ -200,9 +200,9 @@ NULL` on `import_batch_id`. Confirmed true, not assumed.
 
 `admissionsmanager@sirius.app` already had a known working password
 from Module 18's own follow-up verification earlier in this session
-(`AdmissionsManager123!`). `newcounselor@sirius.app`'s original
+(`[REDACTED-Module22]`). `newcounselor@sirius.app`'s original
 password was unknown going in (never previously set by this session) --
-established a real, known password (`NewCounselorM19!`) through the
+established a real, known password (`[REDACTED-Module22]`) through the
 actual `POST /auth/forgot-password` -> real Mailpit email -> real
 `POST /auth/reset-password` flow, the same real redemption path every
 prior module's own account-setup steps have used, not a direct
@@ -429,7 +429,7 @@ follow-up `SELECT` that no rows from either check remain.
   that all 4 deletes were themselves captured by `write_audit()`,
   consistent with this project's existing audit-trail discipline.
 - `newcounselor@sirius.app`'s password intentionally left at its new,
-  real, working value (`NewCounselorM19!`) rather than reverted --
+  real, working value (`[REDACTED-Module22]`) rather than reverted --
   the original was never known to this session (an unknown legacy
   value, not one this session changed away from a known original),
   matching Module 15/18's own precedent for a test account whose

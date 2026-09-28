@@ -29,7 +29,7 @@ placeholder values only. Printed to chat per the task's own
 instruction:
 
 ```
-VAPID_PRIVATE_KEY=McQkEHRjIvO2M1Rd2ai8AUcv1e6FXvhV_d68DilsgIY
+VAPID_PRIVATE_KEY=[REDACTED-Module22 -- rotated live; see module-22 report for shape/rotation record, never the value]
 VAPID_PUBLIC_KEY=BHciNFXBDap1sIgN_mhsOA5N83hJEpsJksOpXG26XzdzGZlK4vrY4H7N9lWXPfj5CZuhwBJhusb--3Sidj3XLaM
 ```
 

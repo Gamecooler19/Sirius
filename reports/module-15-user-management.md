@@ -124,7 +124,7 @@ specifically needed to prove the UI path, not just the API.
   (email, role, "NOT ENROLLED" 2FA badge) and correct nav (Profile
   visible; Users correctly absent for this non-admin role).
 - Filled and submitted the real change-password form
-  (`AdmissionsCounselor123!` -> `NewCounselor789!`) -- real success
+  (`[REDACTED-Module22]` -> `[REDACTED-Module22]`) -- real success
   alert.
 - Logged out, tried the *old* password through the real login form ->
   genuine "invalid email or password" rejection, screenshot-confirmed.

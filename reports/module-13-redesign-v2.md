@@ -307,7 +307,7 @@ and real seeded accounts — no mocks, no static HTML export.
    primary button, Steel Surface background, inline star mark, system-font
    rendering (visibly not Geist — no custom hinting/kerning artifacts).
 
-2. **AUDITOR login** (`auditor@sirius.app` / `Auditor123!`, no TOTP): real
+2. **AUDITOR login** (`auditor@sirius.app` / `[REDACTED-Module22]`, no TOTP): real
    `POST /auth/login` → `200`, session cookie set, redirected into the
    shell. Role-gated nav correctly shows only Home/Finance/Reconciliation/
    Import history (no Applicants, no Import upload) — matches
@@ -341,7 +341,7 @@ and real seeded accounts — no mocks, no static HTML export.
      resize scripts deleted.
 
 6. **Second-role smoke test**: logged in as `ADMISSIONS_COUNSELOR`
-   (`admissionscounselor@sirius.app` / `AdmissionsCounselor123!`). Nav
+   (`admissionscounselor@sirius.app` / `[REDACTED-Module22]`). Nav
    correctly shows only Home/Applicants (a strictly different, narrower
    set than AUDITOR's) — confirms role gating renders correctly across
    at least two distinct roles post-redesign. Navigated to Applicants,
