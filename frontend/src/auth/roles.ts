@@ -70,6 +70,15 @@ export const PAYMENT_SUBMIT_ROLES: RoleCode[] = [
  */
 export const PAYMENT_RESOLVE_ROLES: RoleCode[] = ["SUPER_ADMIN", "FINANCE_MANAGER"];
 
+/** `app.routers.finance_record._FEE_DUE_ROLES`'s own `require_role_session`
+ * allowlist, copied verbatim (Module 22 Part 2) -- identical membership
+ * to `PAYMENT_RESOLVE_ROLES` (both are exactly `SUPER_ADMIN`/
+ * `FINANCE_MANAGER`, the same maker-checker-resolving tier), but named
+ * as its own constant per this file's existing convention of one named
+ * constant per distinct backend `require_role_session` call site.
+ */
+export const FEE_DUE_ROLES: RoleCode[] = ["SUPER_ADMIN", "FINANCE_MANAGER"];
+
 /** `app.routers.reconciliation._ROLES`'s own `require_role_session`
  * allowlist, copied verbatim -- identical membership to `FINANCE_ROLES`
  * today (both mirror the same underlying `finance_record`/`payment_claim`

@@ -301,13 +301,28 @@ export interface PaymentClaimListResponse {
 
 /** Mirrors `api/app/schemas/reads.py::ApplicantFinanceResponse` exactly
  * -- the real `GET /applicants/{id}/finance` response.
+ *
+ * **`total_fee_due: string | null` (Module 22 Part 2) -- `null` means
+ * "no one has entered a fee for this applicant yet," genuinely
+ * distinct from a real, decided `"0.00"`.** Every consumer of this
+ * field must render "not set" for `null` rather than treating it as a
+ * numeric zero -- see `api/app/models/finance_record.py`'s own
+ * docstring for the full account of the live defect this closes.
  */
 export interface ApplicantFinanceResponse {
   finance_record_id: string;
   applicant_id: string;
-  total_fee_due: string;
+  total_fee_due: string | null;
   total_paid: string;
   payment_claims: PaymentClaimDetail[];
+}
+
+/** Mirrors `api/app/schemas/finance_record.py::FinanceRecordFeeDueUpdateRequest`
+ * exactly -- the real `PATCH /finance-records/{id}/fee-due` request
+ * body (Module 22 Part 2).
+ */
+export interface FinanceRecordFeeDueUpdateRequest {
+  total_fee_due: string;
 }
 
 /** Mirrors `api/app/schemas/reads.py::PaymentClaimStatusBreakdown` exactly
@@ -328,10 +343,17 @@ export interface PaymentClaimStatusBreakdown {
  * parent `applicant.intake_cycle` equals this cycle, summed, plus the
  * same `claims_by_status` breakdown for every `payment_claim` against
  * one of those `finance_record`s.
+ *
+ * **`fee_not_set_count` (Module 22 Part 2) -- how many of this cycle's
+ * `finance_record_count` records have no decided fee yet, counted
+ * separately from `total_fee_due`/`outstanding`** -- see that schema's
+ * own docstring for why this is a required distinction, not a
+ * redundant convenience field.
  */
 export interface ReconciliationCycle {
   intake_cycle: string;
   finance_record_count: number;
+  fee_not_set_count: number;
   total_fee_due: string;
   total_paid: string;
   outstanding: string;
@@ -346,6 +368,7 @@ export interface ReconciliationCycle {
  */
 export interface ReconciliationTotals {
   finance_record_count: number;
+  fee_not_set_count: number;
   total_fee_due: string;
   total_paid: string;
   outstanding: string;

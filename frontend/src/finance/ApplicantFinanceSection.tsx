@@ -29,8 +29,8 @@ import { CheckCircle, WarningCircle, CurrencyCircleDollar } from "@phosphor-icon
 import { ApiError } from "../api/client";
 import type { PaymentMode } from "../api/types";
 import { useMe } from "../api/useMe";
-import { PAYMENT_SUBMIT_ROLES, hasRole } from "../auth/roles";
-import { useApplicantFinance, useSubmitPaymentClaim } from "./useFinance";
+import { FEE_DUE_ROLES, PAYMENT_SUBMIT_ROLES, hasRole } from "../auth/roles";
+import { useApplicantFinance, useSubmitPaymentClaim, useUpdateFeeDue } from "./useFinance";
 import { EmptyState } from "../components/EmptyState";
 
 const PAYMENT_MODES: PaymentMode[] = ["CASH", "CHEQUE", "BANK_TRANSFER", "UPI", "CARD", "OTHER"];
@@ -45,6 +45,7 @@ export function ApplicantFinanceSection({ applicantId }: { applicantId: string }
   const meQuery = useMe();
   const financeQuery = useApplicantFinance(applicantId);
   const submitMutation = useSubmitPaymentClaim(applicantId);
+  const feeDueMutation = useUpdateFeeDue(applicantId);
 
   const [amount, setAmount] = useState<number | string>("");
   const [paymentMode, setPaymentMode] = useState<PaymentMode | null>(null);
@@ -52,7 +53,12 @@ export function ApplicantFinanceSection({ applicantId }: { applicantId: string }
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
 
+  const [feeDueInput, setFeeDueInput] = useState<number | string>("");
+  const [feeDueError, setFeeDueError] = useState<string | null>(null);
+  const [feeDueSuccess, setFeeDueSuccess] = useState(false);
+
   const canSubmit = meQuery.data ? hasRole(meQuery.data.role_code, PAYMENT_SUBMIT_ROLES) : false;
+  const canSetFeeDue = meQuery.data ? hasRole(meQuery.data.role_code, FEE_DUE_ROLES) : false;
 
   if (financeQuery.isLoading) {
     return (
@@ -84,7 +90,17 @@ export function ApplicantFinanceSection({ applicantId }: { applicantId: string }
   const finance = financeQuery.data;
   if (!finance) return null;
 
-  const outstanding = (Number(finance.total_fee_due) - Number(finance.total_paid)).toFixed(2);
+  // Module 22 Part 2: total_fee_due is `string | null` -- null means "not
+  // set yet," genuinely distinct from a real, decided "0.00". Outstanding
+  // is only a meaningful number once a fee has actually been entered; for
+  // an unset fee there is nothing yet to be "outstanding" against, so it
+  // renders as the same "not set" text rather than a numeric value derived
+  // from treating null as 0 (which would silently reintroduce the exact
+  // negative-outstanding bug this module's own backend fix closes).
+  const feeDueSet = finance.total_fee_due !== null;
+  const outstanding = feeDueSet
+    ? (Number(finance.total_fee_due) - Number(finance.total_paid)).toFixed(2)
+    : null;
 
   async function handleSubmit() {
     if (!finance || !paymentMode || amount === "") return;
@@ -106,6 +122,25 @@ export function ApplicantFinanceSection({ applicantId }: { applicantId: string }
     }
   }
 
+  async function handleSetFeeDue() {
+    if (!finance || feeDueInput === "") return;
+    setFeeDueError(null);
+    setFeeDueSuccess(false);
+    try {
+      await feeDueMutation.mutateAsync({
+        financeRecordId: finance.finance_record_id,
+        body: { total_fee_due: String(feeDueInput) },
+      });
+      setFeeDueSuccess(true);
+      setFeeDueInput("");
+    } catch (e) {
+      // Real backend rejections (403 wrong role, 422 negative/oversized/
+      // below-total_paid) surface here verbatim -- no pre-check, no
+      // substitute message, matching this file's own submit-claim handler.
+      setFeeDueError(e instanceof ApiError ? e.message : "failed to update fee due");
+    }
+  }
+
   return (
     <Stack gap="sm">
       <Group gap="xl">
@@ -113,7 +148,9 @@ export function ApplicantFinanceSection({ applicantId }: { applicantId: string }
           <Text size="xs" c="dimmed">
             Fee due
           </Text>
-          <Text fw={700}>{finance.total_fee_due}</Text>
+          <Text fw={700} c={feeDueSet ? undefined : "dimmed"}>
+            {feeDueSet ? finance.total_fee_due : "Not set"}
+          </Text>
         </Stack>
         <Stack gap={0}>
           <Text size="xs" c="dimmed">
@@ -125,9 +162,47 @@ export function ApplicantFinanceSection({ applicantId }: { applicantId: string }
           <Text size="xs" c="dimmed">
             Outstanding
           </Text>
-          <Text fw={700}>{outstanding}</Text>
+          <Text fw={700} c={feeDueSet ? undefined : "dimmed"}>
+            {feeDueSet ? outstanding : "Fee not set"}
+          </Text>
         </Stack>
       </Group>
+
+      {canSetFeeDue && (
+        <>
+          <Divider label={feeDueSet ? "Update fee due" : "Set fee due"} />
+
+          {feeDueError && (
+            <Alert color="red" icon={<WarningCircle size={16} weight="light" />}>
+              {feeDueError}
+            </Alert>
+          )}
+          {feeDueSuccess && (
+            <Alert color="green" icon={<CheckCircle size={16} weight="light" />}>
+              Fee due updated.
+            </Alert>
+          )}
+
+          <Group align="flex-end" gap="xs">
+            <NumberInput
+              label="Fee due"
+              placeholder={feeDueSet ? (finance.total_fee_due as string) : "0.00"}
+              value={feeDueInput}
+              onChange={setFeeDueInput}
+              min={0}
+              decimalScale={2}
+              w={160}
+            />
+            <Button
+              onClick={handleSetFeeDue}
+              loading={feeDueMutation.isPending}
+              disabled={feeDueInput === ""}
+            >
+              {feeDueSet ? "Update" : "Set fee"}
+            </Button>
+          </Group>
+        </>
+      )}
 
       {finance.payment_claims.length === 0 ? (
         <EmptyState

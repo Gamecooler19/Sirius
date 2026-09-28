@@ -82,9 +82,20 @@ class PaymentClaimDetail(BaseModel):
 
 
 class ApplicantFinanceResponse(BaseModel):
+    """**`total_fee_due: Decimal | None` (Module 22 Part 2 fix) --
+    `None` means "no one has entered a fee for this applicant yet,"
+    genuinely distinct from a real, decided `Decimal("0.00")`.** See
+    `app.models.finance_record`'s own docstring for the full account;
+    every consumer of this field (the frontend's own
+    `ApplicantFinanceSection`, and any future dashboard aggregation)
+    must render "not set" for `None` rather than treating it as a
+    numeric zero, since collapsing the two would silently reintroduce
+    the exact bug this fix closes.
+    """
+
     finance_record_id: uuid.UUID
     applicant_id: uuid.UUID
-    total_fee_due: Decimal
+    total_fee_due: Decimal | None
     total_paid: Decimal
     payment_claims: list[PaymentClaimDetail]
 
@@ -138,10 +149,29 @@ class ReconciliationCycle(BaseModel):
     whose parent `applicant.intake_cycle` equals this cycle, summed, plus
     the same breakdown for every `payment_claim` against one of those
     `finance_record`s.
+
+    **`fee_not_set_count` (Module 22 Part 2 addition) -- how many of
+    this cycle's `finance_record_count` records have `total_fee_due
+    IS NULL` (no one has entered a fee yet), counted separately from
+    `total_fee_due`/`outstanding`.** `total_fee_due` itself already
+    correctly excludes unset records from the sum (SQL `SUM` ignores
+    `NULL` inputs; `COALESCE` only guards the all-NULL/empty-group
+    case) -- so `total_fee_due`/`outstanding` were never silently
+    wrong for this reason. But a reconciliation viewer reading only
+    the summed total has no way to tell "every fee in this cycle is
+    entered and this cycle really has zero fees due" apart from "N
+    fees haven't been entered yet, so this total understates the true
+    figure" -- exactly the ambiguity this module's own scope requires
+    a real, surfaced distinction for, not merely a correct-by-omission
+    SQL aggregate. `0` here is the honest, common case (every record
+    in the cycle has a decided fee); a nonzero value is a real signal
+    that this cycle's own `total_fee_due`/`outstanding` are a partial,
+    not complete, picture.
     """
 
     intake_cycle: str
     finance_record_count: int
+    fee_not_set_count: int
     total_fee_due: Decimal
     total_paid: Decimal
     outstanding: Decimal
@@ -159,6 +189,7 @@ class ReconciliationTotals(BaseModel):
     """
 
     finance_record_count: int
+    fee_not_set_count: int
     total_fee_due: Decimal
     total_paid: Decimal
     outstanding: Decimal

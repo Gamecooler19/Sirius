@@ -20,8 +20,8 @@
  * order regardless of what the backend happens to return.
  */
 
-import { Alert, Card, Center, Loader, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
-import { WarningCircle, ChartLine } from "@phosphor-icons/react";
+import { Alert, Badge, Card, Center, Group, Loader, SimpleGrid, Stack, Table, Text, Title, Tooltip } from "@mantine/core";
+import { WarningCircle, ChartLine, Info } from "@phosphor-icons/react";
 import { ApiError } from "../api/client";
 import type { PaymentClaimStatus, ReconciliationCycle, ReconciliationTotals } from "../api/types";
 import { useReconciliation } from "./useReconciliation";
@@ -31,6 +31,31 @@ const STATUS_ORDER: PaymentClaimStatus[] = ["PENDING", "CONFIRMED", "REJECTED"];
 
 function amountFor(row: ReconciliationCycle | ReconciliationTotals, status: PaymentClaimStatus) {
   return row.claims_by_status.find((b) => b.status === status) ?? { count: 0, amount: "0" };
+}
+
+/** Module 22 Part 2: `fee_not_set_count > 0` means the `total_fee_due`/
+ * `outstanding` figures on this same row are a partial picture -- N
+ * finance records here have no decided fee entered yet, and their real
+ * contribution to this total is unknown, not zero. Rendered as a
+ * distinct, visible caveat rather than silently folded into the
+ * headline number, since a manager reading only "Fee due: 900000.00"
+ * has no way to know that figure excludes N more records entirely --
+ * see `app.schemas.reads.ReconciliationCycle`'s own docstring for the
+ * full account of why this distinction is required, not a convenience.
+ */
+function FeeNotSetCaveat({ count }: { count: number }) {
+  if (count === 0) return null;
+  return (
+    <Tooltip
+      label={`${count} finance record${count === 1 ? "" : "s"} here ${count === 1 ? "has" : "have"} no fee entered yet -- Fee due/Outstanding above exclude ${count === 1 ? "it" : "them"} entirely, not counted as zero.`}
+      multiline
+      w={280}
+    >
+      <Badge color="orange" variant="light" leftSection={<Info size={12} weight="bold" />}>
+        {count} fee{count === 1 ? "" : "s"} not set
+      </Badge>
+    </Tooltip>
+  );
 }
 
 function TotalsCards({ totals }: { totals: ReconciliationTotals }) {
@@ -46,9 +71,12 @@ function TotalsCards({ totals }: { totals: ReconciliationTotals }) {
           </Text>
         </Card>
         <Card withBorder padding="lg">
-          <Text size="xs" c="dimmed">
-            Fee due
-          </Text>
+          <Group gap="xs" align="center">
+            <Text size="xs" c="dimmed">
+              Fee due
+            </Text>
+            <FeeNotSetCaveat count={totals.fee_not_set_count} />
+          </Group>
           <Text size="xl" fw={700}>
             {totals.total_fee_due}
           </Text>
@@ -143,7 +171,12 @@ export function ReconciliationPage() {
                 <Table.Tr key={cycle.intake_cycle}>
                   <Table.Td fw={600}>{cycle.intake_cycle}</Table.Td>
                   <Table.Td>{cycle.finance_record_count}</Table.Td>
-                  <Table.Td>{cycle.total_fee_due}</Table.Td>
+                  <Table.Td>
+                    <Group gap={6} align="center" wrap="nowrap">
+                      <Text>{cycle.total_fee_due}</Text>
+                      <FeeNotSetCaveat count={cycle.fee_not_set_count} />
+                    </Group>
+                  </Table.Td>
                   <Table.Td>{cycle.total_paid}</Table.Td>
                   <Table.Td>{cycle.outstanding}</Table.Td>
                   {STATUS_ORDER.map((status) => {

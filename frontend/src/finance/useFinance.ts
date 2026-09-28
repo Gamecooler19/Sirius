@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
 import type {
   ApplicantFinanceResponse,
+  FinanceRecordFeeDueUpdateRequest,
   PaymentClaimListResponse,
   PaymentClaimResolveRequest,
   PaymentClaimResponse,
@@ -80,6 +81,32 @@ export function useSubmitPaymentClaim(applicantId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: financeKeys.applicantFinance(applicantId) });
       queryClient.invalidateQueries({ queryKey: ["financeClaims"] });
+    },
+  });
+}
+
+/** `PATCH /finance-records/{id}/fee-due` (Module 22 Part 2) -- the one
+ * real write path for `total_fee_due`. The backend's own `403`
+ * (wrong role) and `422` (negative/oversized/below-total_paid)
+ * rejections surface here verbatim via `ApiError`, the same "no
+ * pre-check, no substitute message" discipline `useResolvePaymentClaim`
+ * already established. On success, invalidates this applicant's own
+ * finance-detail query and the reconciliation query root, so both the
+ * drawer and the dashboard reflect the new figure without a reload.
+ */
+export function useUpdateFeeDue(applicantId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      financeRecordId,
+      body,
+    }: {
+      financeRecordId: string;
+      body: FinanceRecordFeeDueUpdateRequest;
+    }) => api.patch<ApplicantFinanceResponse>(`/finance-records/${financeRecordId}/fee-due`, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: financeKeys.applicantFinance(applicantId) });
+      queryClient.invalidateQueries({ queryKey: ["reconciliation"] });
     },
   });
 }

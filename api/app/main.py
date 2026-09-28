@@ -9,6 +9,7 @@ from app.routers import (
     applicant_create,
     applicants_read,
     auth,
+    finance_record,
     import_,
     import_batches_read,
     notifications,
@@ -36,6 +37,7 @@ app.include_router(status.router)
 app.include_router(applicant_create.router)
 app.include_router(import_.router)
 app.include_router(payment_claim.router)
+app.include_router(finance_record.router)
 app.include_router(applicants_read.router)
 app.include_router(import_batches_read.router)
 app.include_router(reconciliation.router)

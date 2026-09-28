@@ -31,7 +31,7 @@
  * case for the applicant summary.
  */
 
-import { Stack, Title, Text, Card, SimpleGrid, Alert, Center, Loader } from "@mantine/core";
+import { Stack, Title, Text, Card, SimpleGrid, Alert, Center, Loader, Group, Badge, Tooltip } from "@mantine/core";
 import {
   Compass,
   WarningCircle,
@@ -45,6 +45,7 @@ import {
   ArrowUUpLeft,
   UsersThree,
   CurrencyCircleDollar,
+  Info,
 } from "@phosphor-icons/react";
 import { ApiError } from "../api/client";
 import { useMe } from "../api/useMe";
@@ -175,9 +176,22 @@ function FinanceSummarySection() {
         </Text>
       </Card>
       <Card withBorder padding="lg" radius="lg">
-        <Text size="xs" c="dimmed">
-          Fee due
-        </Text>
+        <Group gap="xs" align="center">
+          <Text size="xs" c="dimmed">
+            Fee due
+          </Text>
+          {totals.fee_not_set_count > 0 && (
+            <Tooltip
+              label={`${totals.fee_not_set_count} finance record${totals.fee_not_set_count === 1 ? "" : "s"} ${totals.fee_not_set_count === 1 ? "has" : "have"} no fee entered yet -- this total excludes ${totals.fee_not_set_count === 1 ? "it" : "them"} entirely, not counted as zero.`}
+              multiline
+              w={260}
+            >
+              <Badge color="orange" variant="light" leftSection={<Info size={12} weight="bold" />}>
+                {totals.fee_not_set_count} not set
+              </Badge>
+            </Tooltip>
+          )}
+        </Group>
         <Text size="xl" fw={700}>
           {totals.total_fee_due}
         </Text>

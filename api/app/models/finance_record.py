@@ -13,6 +13,21 @@ reached that status.
 This module creates the table so the next module's payment-workflow
 endpoints have something to write balances and reconciliation state to; the
 reconciliation logic itself is out of scope here.
+
+**`total_fee_due` is nullable (Module 22 Part 2 fix, migration
+0015_finance_fee_due) -- `NULL` means "no one has entered a fee for
+this applicant yet," distinct from a real, decided `0.00` ("this
+applicant's fee is confirmed to be zero"). `total_fee_due` was
+previously `NOT NULL` with a `0` default and, confirmed live via
+`audit_log`'s own history, was never written by any real API endpoint
+at all -- every row's fee stayed at that placeholder `0` forever,
+making every dashboard/reconciliation "outstanding" figure
+(`total_fee_due - total_paid`) wrong for any applicant who had ever
+paid anything, since a real payment against an unset fee produced a
+genuine negative "outstanding" balance. `PATCH
+/finance-records/{id}/fee-due` (`app.routers.finance_record`) is the
+one real write path for this column now; see that router's own
+docstring for the full account.**
 """
 
 import uuid
@@ -31,5 +46,6 @@ class FinanceRecord(UUIDPKMixin, TimestampMixin, Base):
 
     applicant_id: Mapped[uuid.UUID] = mapped_column(*fk_uuid("applicant.id"), nullable=False)
 
-    total_fee_due: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    total_fee_due: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True, default=None)
     total_paid: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+

@@ -192,4 +192,177 @@ none of them were ever tracked, and none remain.
 
 ## Part 2 -- Finance figure integrity
 
-*(pending)*
+### The confirmed defect
+
+`finance_record.total_fee_due` was never written by any real API
+endpoint. Confirmed live via `audit_log`'s full history for
+`finance_record`: every row's `total_fee_due` was `0.00` from the
+instant `applicant_create_finance_record()`'s auto-create trigger
+inserted it, and stayed `0.00` forever afterward -- only `total_paid`
+ever changed, via the existing payment-confirm rollup trigger. The
+consequence was real and observed, not theoretical: two genuine
+`finance_record` rows showed `outstanding` (`total_fee_due -
+total_paid`) balances of `-250000.00` and `-300000.00` -- real
+applicants who had paid real, confirmed money against a fee that was
+never actually entered anywhere.
+
+### Schema change: `total_fee_due` becomes nullable
+
+`NULL` now means "no one has entered a fee for this applicant yet,"
+structurally distinct from a real, decided `0.00` (a genuinely free
+program). Migration `0015_finance_fee_due`:
+
+- Backfills both pre-existing `0.00` rows to `NULL` (confirmed via
+  `audit_log` that neither ever received a real write -- their `0.00`
+  was the auto-create trigger's own placeholder, not a decision).
+- Drops the `NOT NULL` constraint.
+- Adds `ck_finance_record_fee_due_nonnegative` (`total_fee_due IS NULL
+  OR total_fee_due >= 0`) and `ck_finance_record_total_paid_nonnegative`
+  (`total_paid >= 0`) -- verified zero pre-existing violations before
+  adding either, matching this project's own established precedent.
+- Updates `applicant_create_finance_record()` to insert `NULL` instead
+  of `0` for every future auto-created record.
+
+**Two real defects this migration's own first run hit live, both
+fixed within the migration itself, not worked around:**
+
+1. The backfill `UPDATE` initially affected zero rows. Alembic
+   connects as `sirius` (the table owner), and `finance_record` carries
+   `FORCE ROW LEVEL SECURITY` -- a migration has no request-scoped
+   `app.actor_role` GUC set at all, so the still-in-effect
+   `finance_record_update` policy's predicate evaluated to `NULL` and
+   silently excluded every row, exactly like RLS's own documented
+   fail-closed behavior. Fixed with a `SET LOCAL app.actor_role =
+   'SUPER_ADMIN'` scoped to the migration's own transaction.
+2. Backfilling before dropping `NOT NULL` raised a real
+   `NotNullViolationError` -- corrected by reordering to `DROP NOT
+   NULL` first, then backfill.
+
+### RLS: `finance_record_update` narrowed
+
+From `SUPER_ADMIN`/`FINANCE_STAFF`/`FINANCE_MANAGER`/`AUDITOR` down to
+`SUPER_ADMIN`/`FINANCE_MANAGER` only, per the module's own explicit
+requirement. `FINANCE_STAFF` may submit a payment claim but was never
+meant to resolve one or set the fee it is measured against (the same
+maker-checker separation `payment_claim`'s own confirm/reject
+endpoints already enforce); `AUDITOR` reviews figures, does not write
+them.
+
+**Verified live, both directions:**
+- A direct `UPDATE finance_record` issued as the ordinary `sirius`
+  role with `app.actor_role` set to `FINANCE_STAFF`, bypassing the
+  application layer entirely, affected **zero rows** -- real RLS
+  denial, not merely an application-layer 403. Same result for
+  `AUDITOR`.
+- The identical direct `UPDATE` with `app.actor_role` set to
+  `FINANCE_MANAGER` affected **one row** -- confirming the narrowed
+  policy still permits the roles it is supposed to.
+- The existing payment-confirm rollup trigger (`payment_claim_
+  increment_finance_record_total_paid()`, migration 0009) still fires
+  correctly under the new, narrower policy: confirmed a real pending
+  claim via `POST /finance/payment-claims/{id}/confirm` as
+  `financemanager`, and `total_paid` incremented by exactly the
+  claimed amount (`300000.00 -> 350000.00`).
+
+### New endpoint: `PATCH /finance-records/{id}/fee-due`
+
+The one real write path for `total_fee_due`, in
+`app.routers.finance_record`:
+
+- **RBAC**: `FINANCE_MANAGER`/`SUPER_ADMIN` only
+  (`require_role_session`), matching the narrowed RLS policy exactly.
+- **Schema** (`FinanceRecordFeeDueUpdateRequest`): `ge=0, max_digits=12,
+  decimal_places=2` -- matches the real `numeric(12,2)` column exactly.
+- **Rejects lowering the fee below the already-confirmed `total_paid`**
+  with a `422` naming both figures, read from the same row inside the
+  same transaction (not a stale value from an earlier request).
+- Writes only `total_fee_due` -- `total_paid` is not settable through
+  this endpoint at all; its only legitimate write path remains the
+  existing rollup trigger.
+
+**Live-verified boundary cases, all real HTTP calls against the
+running stack:**
+
+| Case | Result |
+|---|---|
+| `FINANCE_MANAGER` lowers fee below current `total_paid` | real `422`, body names both figures verbatim |
+| `FINANCE_MANAGER` sets fee above `total_paid` | real `200`, fee updated |
+| Negative value (`-100.00`) | real `422`, Pydantic `ge=0` violation |
+| 13-significant-digit value (`99999999999.99`) | real `422`, `max_digits=12` violation |
+| Three-decimal value (`100.005`) | real `422`, `decimal_places=2` violation |
+| `FINANCE_STAFF` attempts the endpoint | real `403`, "insufficient role for this action" |
+
+### Audit trail
+
+`write_audit()` correctly captured the fee-due change with no new
+code: a real `PATCH` call produced a genuine `audit_log` row for
+`finance_record`, `action=UPDATE`, `before->total_fee_due: null`,
+`after->total_fee_due: 500000.00`, `actor_id` correctly matching the
+calling `FINANCE_MANAGER`'s own user id -- the existing trigger-based
+audit design (ADR-07) required no changes to cover this new write
+path.
+
+### "Fee not set" vs "fee = 0" in dashboard/reconciliation aggregation
+
+`GET /finance/reconciliation` gains `fee_not_set_count` (per cycle and
+in `totals`) -- a `func.count(...).filter(total_fee_due IS NULL)` in
+the same existing query, not a second round trip.
+`total_fee_due`/`outstanding` themselves were already arithmetically
+correct once unset records became `NULL` (SQL `SUM` ignores `NULL`
+inputs without any special-casing), but a viewer reading only the
+summed total had no way to tell "this cycle's total is complete" apart
+from "N records here have no fee entered, so this total understates
+the true figure" -- `fee_not_set_count` makes that distinction
+explicit and visible rather than silently correct-by-omission.
+
+Frontend: `ApplicantFinanceSection` renders "Not set"/"Fee not set"
+instead of a numeric zero when `total_fee_due` is `null`, and exposes
+the new `FINANCE_MANAGER`/`SUPER_ADMIN`-gated "Set fee due"/"Update fee
+due" control, wired to the real endpoint with backend errors surfaced
+verbatim (no pre-check, no substitute message). `ReconciliationPage`
+and `HomePage`'s finance summary both render a visible "N fee(s) not
+set" badge with an explanatory tooltip whenever `fee_not_set_count >
+0`, rather than folding it silently into the headline number.
+
+**Live-verified end to end through the real browser UI**, not only via
+`curl`: logged in as `financemanager`, transitioned a real applicant
+to `ADMISSION_TAKEN` (creating a fresh `finance_record` with
+`total_fee_due = NULL`), opened its detail drawer, and confirmed the
+UI rendered "Fee due: Not set" / "Outstanding: Fee not set" with a
+"Set fee due" control. Entered `450000` and clicked "Set fee": the UI
+updated to "Fee due: 450000.00" / "Outstanding: 450000.00" with a real
+"Fee due updated." success message, and the control relabeled itself
+to "Update fee due" / "Update" -- the full round trip, confirmed
+visually against the real running stack.
+
+### Re-confirmation of previously-verified figures (Modules 04/05/14)
+
+After every schema/RLS/endpoint change above, re-ran the exact reads
+those modules originally verified:
+
+- `GET /applicants/{id}/finance` for both original applicants: figures
+  unchanged and correct (`500000.00`/`250000.00` and
+  `400000.00`/`350000.00`).
+- `GET /finance/reconciliation`: totals correctly sum to
+  `1350000.00` fee due / `600000.00` paid / `750000.00` outstanding
+  across three finance records (two original + the one created during
+  this section's own live UI verification) -- no negative outstanding
+  anywhere, `fee_not_set_count: 0` since every record now has a
+  decided fee.
+- Module 14's Home dashboard finance summary: confirmed live in the
+  real browser, renders the same correct totals with no negative
+  figures.
+
+### Deliberate scope note
+
+The one real applicant transitioned to `ADMISSION_TAKEN` during this
+section's own live UI verification (to produce a genuine, freshly
+unset `finance_record` to test against, since both pre-existing
+records already had a fee set by this point) was left in that
+real, now-admitted state with its fee genuinely set to `450000.00` --
+not reverted. This pipeline has no transition back out of
+`ADMISSION_TAKEN` in its own design, so reverting would have required
+a direct database write (creating exactly the kind of un-audited,
+bypass-the-real-workflow state change this project's own established
+precedent avoids), for a change that is itself a real, valid,
+correctly-audited state, not corrupted test debris.

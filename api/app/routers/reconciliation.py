@@ -56,6 +56,17 @@ test unless someone thinks to compare them. Summing the already-built
 `cycles` list in Python instead makes `totals == sum(cycles)` a structural
 guarantee of this function's own control flow, not a fact that merely
 happens to hold today and could stop holding tomorrow.
+
+**Module 22 Part 2: `fee_not_set_count` per cycle/totals.** `total_fee_due`'s
+own `SUM` already correctly ignores `NULL` (unset) records without any
+special-casing here -- Postgres's `SUM`/`COALESCE` already do the right
+thing for that. `fee_not_set_count` is a second aggregate, computed in
+the same Query A via `func.count` filtered to `total_fee_due IS NULL`,
+so a caller can tell "this cycle's total is the complete picture" apart
+from "N records in this cycle have no decided fee yet, so this total
+understates the true figure" -- see `app.schemas.reads.ReconciliationCycle`'s
+own docstring for the full account of why this is a real, required
+distinction, not a redundant convenience field.
 """
 
 from collections import defaultdict
@@ -102,11 +113,14 @@ async def get_reconciliation(
 
     # Query A: finance_record totals per cycle. No join to payment_claim
     # -- see module docstring for why joining it here would fan out and
-    # over-count total_fee_due/total_paid.
+    # over-count total_fee_due/total_paid. fee_not_set_count (Module 22
+    # Part 2) is a plain conditional count in the same query, not a
+    # separate round trip.
     finance_query = (
         select(
             Applicant.intake_cycle,
             func.count(FinanceRecord.id),
+            func.count(FinanceRecord.id).filter(FinanceRecord.total_fee_due.is_(None)),
             func.coalesce(func.sum(FinanceRecord.total_fee_due), 0),
             func.coalesce(func.sum(FinanceRecord.total_paid), 0),
         )
@@ -137,7 +151,7 @@ async def get_reconciliation(
         claims_by_cycle[cycle][claim_status] = (count, amount)
 
     cycles: list[ReconciliationCycle] = []
-    for cycle, fr_count, fee_due, paid in finance_rows:
+    for cycle, fr_count, fee_not_set_count, fee_due, paid in finance_rows:
         breakdown = [
             PaymentClaimStatusBreakdown(
                 status=s,
@@ -150,6 +164,7 @@ async def get_reconciliation(
             ReconciliationCycle(
                 intake_cycle=cycle,
                 finance_record_count=fr_count,
+                fee_not_set_count=fee_not_set_count,
                 total_fee_due=fee_due,
                 total_paid=paid,
                 outstanding=fee_due - paid,
@@ -165,10 +180,12 @@ async def get_reconciliation(
         s: [0, Decimal(0)] for s in _ALL_CLAIM_STATUSES
     }
     total_fr_count = 0
+    total_fee_not_set_count = 0
     total_fee_due = Decimal(0)
     total_paid = Decimal(0)
     for cycle in cycles:
         total_fr_count += cycle.finance_record_count
+        total_fee_not_set_count += cycle.fee_not_set_count
         total_fee_due += cycle.total_fee_due
         total_paid += cycle.total_paid
         for bucket in cycle.claims_by_status:
@@ -177,6 +194,7 @@ async def get_reconciliation(
 
     totals = ReconciliationTotals(
         finance_record_count=total_fr_count,
+        fee_not_set_count=total_fee_not_set_count,
         total_fee_due=total_fee_due,
         total_paid=total_paid,
         outstanding=total_fee_due - total_paid,
