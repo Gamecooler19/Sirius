@@ -168,6 +168,16 @@ services:
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
       VAPID_SUBJECT: ${VAPID_SUBJECT}
+      # Module 23: plaintext initial password for the one seeded
+      # SUPER_ADMIN account -- read only by migration
+      # 0016_seed_superadmin, at migration-run time, and only here (the
+      # migrate service). The api service below deliberately does not
+      # receive this variable at all: no request-path code ever needs
+      # it, and every other credential in this stack that only a
+      # migration or a one-shot script needs (see SIRIUS_DB_PASSWORD's
+      # own scoping precedent) is likewise not handed to services with
+      # no reason to read it.
+      SUPERADMIN_INITIAL_PASSWORD: ${SUPERADMIN_INITIAL_PASSWORD}
     command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres:
