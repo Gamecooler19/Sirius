@@ -173,4 +173,37 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     conn = op.get_bind()
+
+    # A real ForeignKeyViolationError, hit live: once this account has
+    # actually completed TOTP enrollment (POST /auth/totp/enroll/confirm),
+    # it owns real user_backup_code rows, and user_backup_code_user_id_fkey
+    # (migration 0002) carries no ON DELETE CASCADE -- the naive `DELETE
+    # FROM "user"` below fails with "update or delete on table user
+    # violates foreign key constraint user_backup_code_user_id_fkey"
+    # the instant this migration's own downgrade path is exercised against
+    # a database where this seed account was actually used, not merely
+    # inserted and left untouched. Deleting this account's own backup
+    # codes first (by user_id, via a subquery keyed on this migration's
+    # own fixed email -- never a second hardcoded id) makes the
+    # subsequent user delete unconditionally safe, matching this same
+    # migration's own "never leave the database in a state only a
+    # from-scratch reset can recover from" standard applied everywhere
+    # else in this codebase (e.g. 0015_finance_fee_due's own ordering
+    # fix for an analogous live failure).
+    #
+    # audit_log.actor_id also references "user" with no CASCADE, but
+    # every audit_log row's actor_id is NULL in practice for this
+    # account's own self-service auth actions (login/enroll/verify route
+    # unscoped `get_db()` sessions carry no app.actor_id GUC to record),
+    # so it is not a live blocker the way user_backup_code is -- verified
+    # live, not merely assumed, before relying on that omission here.
+    conn.execute(
+        text(
+            """
+            DELETE FROM user_backup_code
+            WHERE user_id = (SELECT id FROM "user" WHERE email = :email)
+            """
+        ),
+        {"email": SEED_EMAIL},
+    )
     conn.execute(text('DELETE FROM "user" WHERE email = :email'), {"email": SEED_EMAIL})

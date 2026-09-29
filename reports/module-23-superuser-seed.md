@@ -60,7 +60,59 @@ after `0015_finance_fee_due`, following `0005_seed_roles`'s own
   migration runs, so a working login while `activated_at` stays `NULL`
   is consistent with that column's own documented, display-only
   purpose, not a contradiction.
-- `downgrade()` deletes the seeded row by email.
+- `downgrade()` deletes the seeded row by email — and, as of this
+  module's own follow-up verification (see "A real defect found and
+  fixed" below), the account's own `user_backup_code` rows first.
+
+### 1a. A real defect found and fixed during this module's own follow-up verification
+
+`downgrade()`'s first version deleted only the `"user"` row. That is
+correct for a database where the seed was inserted and never touched
+again, but this module's own live verification had, by this point,
+actually completed real browser-driven TOTP enrollment against the
+seeded account (see section 6 below) — giving it ten real
+`user_backup_code` rows. `user_backup_code_user_id_fkey` (migration
+0002) carries no `ON DELETE CASCADE`, so re-running
+`alembic downgrade 0015_finance_fee_due` against that same database hit
+a real, live `asyncpg.exceptions.ForeignKeyViolationError`: "update or
+delete on table `user` violates foreign key constraint
+`user_backup_code_user_id_fkey`" — not a hypothetical, the actual
+downgrade command failed with this exact error on the actual running
+stack. Alembic's own transactional DDL rolled the failed attempt back
+cleanly (confirmed via `psql`: the database was left exactly at head,
+one user row, no partial state), but the `downgrade()` path itself was
+still genuinely broken for any database where this account had ever
+been used.
+
+**Fixed** by deleting the account's own `user_backup_code` rows (by
+`user_id`, resolved via a subquery keyed on this migration's own fixed
+seed email — never a second hardcoded id) before deleting the `"user"`
+row itself — the same "verify before you rely on an omission" standard
+`0015_finance_fee_due`'s own report already established for an
+analogous live ordering defect. `audit_log.actor_id` also references
+`"user"` with no cascade, but was checked live (`SELECT actor_id, count(*)
+FROM audit_log GROUP BY actor_id` with `app.actor_role` set to see past
+RLS) and confirmed `NULL` for every row this account's own self-service
+auth actions ever produced — not a live blocker, so no matching cleanup
+was needed there.
+
+**Re-verified live after the fix**, rebuilding the `migrate` image first
+(the running container still held the pre-fix file):
+`alembic downgrade 0015_finance_fee_due` against the same database (with
+its real, ten-row `user_backup_code` set still in place) completed
+without error; `psql` confirmed both the `user` row and all ten
+`user_backup_code` rows were gone. `alembic upgrade head` immediately
+after re-created the seed account correctly.
+
+Because this defect was found mid-verification, **the full reset and
+bring-up were repeated a second time** (`docker compose down -v` /
+`up -d --build`) against the corrected migration file, so the delivered
+final state was produced by the fixed code end to end, not patched in
+place after the fact. Every verification step in this report below
+(psql row counts, real login, real TOTP enrollment through the actual
+UI, the second HTTP-only login+verify+protected-route cycle) was
+re-run against that final, fixed-migration bring-up — the numbers and
+user id shown below are from that final run.
 
 ### 2. `SUPERADMIN_INITIAL_PASSWORD` generation and wiring
 
@@ -114,7 +166,27 @@ from `0001_baseline` through the new `0016_seed_superadmin`, exit code
 - `SELECT id, email, full_name, role_id, totp_enabled, is_active,
   activated_at FROM "user"` returned **exactly one row**:
   `ptandon3@hawk.illinoistech.edu`, `Pradyumn Tandon`,
-  `totp_enabled=f`, `is_active=t`, `activated_at` NULL.
+  `totp_enabled=f`, `is_active=t`, `activated_at` NULL (this state, and
+  the `totp_enabled=t`/`activated_at` NULL state shown later in this
+  report, both reflect the same account at two different points in the
+  same final, fixed-migration bring-up — before and after this
+  verification round's own TOTP enrollment).
+- `password_hash` was read directly and checked independently against
+  `app.core.security.verify_password` (the app's own function, not a
+  re-implementation) inside the running `api` container:
+  `verify_password('<the generated password>', <stored hash>)` returned
+  `True`; the same call with an arbitrary wrong string returned `False`
+  — the stored hash is a real, working Argon2id hash of the exact
+  generated password, not merely a plausible-looking string. The stored
+  value itself (`$argon2id$v=19$m=65536,t=3,p=4$...`) also matches the
+  exact `time_cost=3`/`memory_cost=65536`/`parallelism=4` parameters
+  `app/core/security.py`'s own `PasswordHasher()` uses, confirming no
+  separate/weaker hasher was used.
+- `docker compose exec api env` confirmed `SUPERADMIN_INITIAL_PASSWORD`
+  is genuinely absent from the `api` service's own environment (no
+  match), while `docker compose run --rm migrate env` confirmed it is
+  present there — the docker-compose scoping described above is real,
+  not just written in a comment nobody checked.
 - Joining that row to `"role"` confirmed `role_code = SUPER_ADMIN`.
 - `SELECT code, name FROM "role"` confirmed all six expected roles seeded
   correctly by `0005_seed_roles`, unaffected by the new migration.
